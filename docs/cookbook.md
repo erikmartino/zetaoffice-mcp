@@ -660,9 +660,9 @@ verification.
 
 ### Caption with a live sequence cross-reference
 
-A caption is a `SetExpression` sequence field. A real cross-reference is a
-`GetReference` field; its enum properties must be set with `set_enum`, because
-their type names are not registered in this build.
+A caption number is a `SetExpression` **sequence** field; the cross-reference
+is a `GetReference` field. Use `set_enum` for the numeric/enum properties: a
+typed `set` can silently leave them at 0 in this build.
 
 ```js
 const U = (o) => tools.zetaoffice.uno(o);
@@ -677,13 +677,14 @@ const masters = (await U({ op: "call", h, name: "getTextFieldMasters" })).value.
 const master = (await U({ op: "call", h: masters, name: "getByName",
   args: ["com.sun.star.text.fieldmaster.SetExpression.Figure"] })).value.$h;
 await U({ op: "call", h: text, name: "insertString", args: [{ $h: cur }, "Figure ", false] });
+
 const seq = (await U({ op: "call", h, name: "createInstance",
   args: ["com.sun.star.text.textfield.SetExpression"] })).value.$h;
 await U({ op: "call", h: seq, name: "attachTextFieldMaster", args: [{ $h: master }] });
-await U({ op: "set", h: seq, name: "SubType",
-  value: { $e: "com.sun.star.text.SetVariableType", v: "SEQUENCE" } });
-await U({ op: "set", h: seq, name: "Content", value: "Figure" });
-await U({ op: "set", h: seq, name: "SequenceValue", value: 1 });
+await U({ op: "set_enum", h: seq, name: "SubType", value: 1 });        // SEQUENCE
+await U({ op: "set", h: seq, name: "Content", value: "Figure+1" });    // formula
+await U({ op: "set_enum", h: seq, name: "NumberingType", value: 4 });  // ARABIC
+await U({ op: "set_enum", h: seq, name: "SequenceValue", value: 1 });
 await U({ op: "call", h: text, name: "insertTextContent",
   args: [{ $h: cur }, { $h: seq }, false] });
 await U({ op: "call", h: text, name: "insertString", args: [{ $h: cur }, ": caption text.", false] });
@@ -694,18 +695,27 @@ const ref = (await U({ op: "call", h, name: "createInstance",
   args: ["com.sun.star.text.textfield.GetReference"] })).value.$h;
 await U({ op: "set_enum", h: ref, name: "ReferenceFieldSource", value: 1 }); // SEQUENCE_FIELD
 await U({ op: "set", h: ref, name: "SourceName", value: "Figure" });
-await U({ op: "set_enum", h: ref, name: "ReferenceFieldPart", value: 5 });  // CATEGORY_AND_NUMBER
+await U({ op: "set_enum", h: ref, name: "ReferenceFieldPart", value: 7 });   // ONLY_SEQUENCE_NUMBER
 await U({ op: "call", h: text, name: "insertTextContent",
   args: [{ $h: cur }, { $h: ref }, false] });
 
-const rq = (await U({ op: "query", h, iface: "com.sun.star.util.XRefreshable" })).value.$h;
-await U({ op: "call", h: rq, name: "refresh" });
+// Re-render fields after a change (DispatchHelper, not just refresh()).
+const helper = (await U({ op: "create", service: "com.sun.star.frame.DispatchHelper" })).value.$h;
+const ctrl = (await U({ op: "call", h, name: "getCurrentController" })).value.$h;
+const frame = (await U({ op: "call", h: ctrl, name: "getFrame" })).value.$h;
+const dp = (await U({ op: "query", h: frame, iface: "com.sun.star.frame.XDispatchProvider" })).value.$h;
+await U({ op: "call", h: helper, name: "executeDispatch",
+  args: [{ $h: dp }, ".uno:UpdateFields", "_self", 0, []] });
+
 await tools.zetaoffice.save({ action: "export", file_path: "out/caption.odt", export_format: "odt" });
 ```
 
-Check `text:sequence-ref` in the ODT, or read `ReferenceFieldSource` back (1)
-and `ReferenceFieldPart` (5). Use `set_enum` whenever a typed `set` reports
-success but the value stays 0.
+Enum values used: `SetVariableType.SEQUENCE=1`, `NumberingType.ARABIC=4`,
+`ReferenceFieldSource.SEQUENCE_FIELD=1`, `ReferenceFieldPart.ONLY_SEQUENCE_NUMBER=7`
+(`CATEGORY_AND_NUMBER=5` includes the label). For a sequence field the
+`Content` is a formula (`Figure+1`), not a literal label; the displayed number
+derives from `SequenceValue`. `getPresentation(false)` returns the displayed
+text, `getPresentation(true)` the command.
 
 ### Math formula
 
