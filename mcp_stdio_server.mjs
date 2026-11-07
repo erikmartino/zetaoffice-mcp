@@ -615,6 +615,9 @@ com.sun.star interface without needing a dedicated tool.
 - root: handle to the UNO component context.
 - get(h, name): attribute, getX() accessor or property value.
 - set(h, name, value): attribute or property.
+- set_enum(h, name, value): set an enum property by its numeric value, using
+  the type carried by the property (works for enum types that are not
+  registered by name, e.g. ReferenceFieldSource).
 - call(h, name, args): invoke a method.
 - query(h, iface): queryInterface -> handle or null.
 - create(service): createInstanceWithContext (no handle needed).
@@ -638,16 +641,16 @@ https://raw.githubusercontent.com/LibreOffice/core/master/offapi/com/sun/star/
 <module>/<Type>.idl (raw IDL). The Wasm build can differ from the docs, so
 describe is authoritative.`,
   {
-    op: z.enum(["root", "get", "set", "call", "query", "create", "describe", "release"])
+    op: z.enum(["root", "get", "set", "set_enum", "call", "query", "create", "describe", "release"])
       .describe("Operation to perform"),
     h: z.number().int().optional().describe("Object handle (from a previous result)"),
-    name: z.string().optional().describe("Member or method name (for 'get', 'set', 'call')"),
+    name: z.string().optional().describe("Member or method name (for 'get', 'set', 'set_enum', 'call')"),
     iface: z.string().optional().describe("Interface name (for 'query')"),
     service: z.string().optional().describe("Service name (for 'create')"),
     type: z.string().optional().describe("Interface or service name (for 'describe')"),
     method: z.string().optional().describe("Only describe this method (for 'describe')"),
     args: z.array(z.any()).optional().describe("Method arguments (for 'call')"),
-    value: z.any().optional().describe("Value to assign (for 'set')")
+    value: z.any().optional().describe("Value to assign (for 'set'); numeric enum value for 'set_enum'")
   },
   async ({ op, h, name, iface, service, type, method, args, value }) => {
     const payload = { op, h, name, iface, service, type, method, args, v: value };

@@ -658,6 +658,55 @@ return { shapes: (await U({ op: "call", h: page, name: "getCount" })).value };
 Replace `WATERMARK` with the required text. The page shape count is the
 verification.
 
+### Caption with a live sequence cross-reference
+
+A caption is a `SetExpression` sequence field. A real cross-reference is a
+`GetReference` field; its enum properties must be set with `set_enum`, because
+their type names are not registered in this build.
+
+```js
+const U = (o) => tools.zetaoffice.uno(o);
+const doc = await tools.zetaoffice.document({ action: "create", doc_type: "writer" });
+const h = doc.handle.$h;
+const text = (await U({ op: "call", h, name: "getText" })).value.$h;
+const cur = (await U({ op: "call", h: text, name: "createTextCursor" })).value.$h;
+await U({ op: "call", h: cur, name: "gotoEnd", args: [false] });
+await U({ op: "call", h: cur, name: "collapseToEnd" });
+
+const masters = (await U({ op: "call", h, name: "getTextFieldMasters" })).value.$h;
+const master = (await U({ op: "call", h: masters, name: "getByName",
+  args: ["com.sun.star.text.fieldmaster.SetExpression.Figure"] })).value.$h;
+await U({ op: "call", h: text, name: "insertString", args: [{ $h: cur }, "Figure ", false] });
+const seq = (await U({ op: "call", h, name: "createInstance",
+  args: ["com.sun.star.text.textfield.SetExpression"] })).value.$h;
+await U({ op: "call", h: seq, name: "attachTextFieldMaster", args: [{ $h: master }] });
+await U({ op: "set", h: seq, name: "SubType",
+  value: { $e: "com.sun.star.text.SetVariableType", v: "SEQUENCE" } });
+await U({ op: "set", h: seq, name: "Content", value: "Figure" });
+await U({ op: "set", h: seq, name: "SequenceValue", value: 1 });
+await U({ op: "call", h: text, name: "insertTextContent",
+  args: [{ $h: cur }, { $h: seq }, false] });
+await U({ op: "call", h: text, name: "insertString", args: [{ $h: cur }, ": caption text.", false] });
+await U({ op: "call", h: text, name: "insertControlCharacter", args: [{ $h: cur }, 0, false] });
+
+await U({ op: "call", h: text, name: "insertString", args: [{ $h: cur }, "see figure ", false] });
+const ref = (await U({ op: "call", h, name: "createInstance",
+  args: ["com.sun.star.text.textfield.GetReference"] })).value.$h;
+await U({ op: "set_enum", h: ref, name: "ReferenceFieldSource", value: 1 }); // SEQUENCE_FIELD
+await U({ op: "set", h: ref, name: "SourceName", value: "Figure" });
+await U({ op: "set_enum", h: ref, name: "ReferenceFieldPart", value: 5 });  // CATEGORY_AND_NUMBER
+await U({ op: "call", h: text, name: "insertTextContent",
+  args: [{ $h: cur }, { $h: ref }, false] });
+
+const rq = (await U({ op: "query", h, iface: "com.sun.star.util.XRefreshable" })).value.$h;
+await U({ op: "call", h: rq, name: "refresh" });
+await tools.zetaoffice.save({ action: "export", file_path: "out/caption.odt", export_format: "odt" });
+```
+
+Check `text:sequence-ref` in the ODT, or read `ReferenceFieldSource` back (1)
+and `ReferenceFieldPart` (5). Use `set_enum` whenever a typed `set` reports
+success but the value stays 0.
+
 ### Math formula
 
 ```
@@ -740,7 +789,7 @@ Common dead ends and their fix:
 | `'<tool>' is not implemented` | the active client is an old browser tab | restart the bridge, open a fresh tab, or use `?target=node` |
 | Float property rejects a number | integer became Long | use `{"$f":1.5}` for floats |
 | Conditional format vanishes on export | `range.ConditionalFormat.addNew()` accepts the entry but it is not attached to the sheet model in this build; the ODS/XLSX writers emit nothing | known engine gap (B3): report it instead of retrying; `XConditionalFormats.createByRange` needs an `XSheetCellRanges` that is not reachable here |
-| Cross-reference field does not resolve | `GetReference` accepts `SourceName`, but `ReferenceFieldSource`/`ReferenceFieldPart` stay 0 (PAGE) in this build, so no `text:sequence-ref` is written | known engine gap: a `SetExpression`/`GetExpression` variable pair updates text but exports as variables, not a real reference; report it, do not spend minutes probing enums |
+| `set` on an enum property leaves it at 0 | the enum type name is not registered in this build, so a typed Any cannot be built by name | use `uno {op:"set_enum", h, name, value:<number>}`: it takes the Type from the runtime property descriptor |
 
 ---
 

@@ -835,6 +835,16 @@ function unoToAny(raw) {
   if (raw && typeof raw === 'object' && raw.$f !== undefined) {
     return new Module.uno_Any(Module.uno_Type.Double(), raw.$f);
   }
+  // A typed enum explicitly carries its UNO type. Inferring the type from the
+  // constant can produce a Long Any, which some property setters silently
+  // ignore (e.g. ReferenceFieldSource/ReferenceFieldPart on GetReference).
+  if (raw && typeof raw === 'object' && raw.$e) {
+    const ty = Module.uno_Type.Enum(String(raw.$e));
+    const value = typeof raw.v === 'number'
+      ? raw.v
+      : unoResolveType(raw.$e)[raw.v];
+    return new Module.uno_Any(ty, value);
+  }
   const decoded = unoDecode(raw);
   let ty;
   try { ty = zetajs.getAnyType(decoded); } catch (e) { ty = undefined; }
@@ -1110,6 +1120,21 @@ function unoDispatch(req) {
       } finally {
         type.delete();
       }
+    }
+    case 'set_enum': {
+      // Set an enum property using the type carried by the property itself.
+      // Some builds do not register the enum name for Module.uno_Type.Enum,
+      // but the runtime property descriptor still knows its Type.
+      const obj = unoGetHandle(req.h);
+      const info = obj.getPropertySetInfo();
+      const prop = info.getPropertyByName(req.name);
+      const any = new Module.uno_Any(prop.Type, req.value);
+      try {
+        obj.setPropertyValue(req.name, any);
+      } finally {
+        any.delete();
+      }
+      return null;
     }
     case 'release':
       unoObjects.delete(req.h);
