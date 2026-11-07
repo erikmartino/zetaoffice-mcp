@@ -8,9 +8,10 @@ Built on **ZetaOffice / LOWA** (LibreOffice compiled to WebAssembly), **ZetaJS**
 
 ## Features
 
-- **11 MCP tools**: `document`, `structure`, `cursor`, `selection`, `search`, `track_changes`, `comments`, `save`, `text`, `formula`, `picture`
+- **19 MCP tools**: document editing (`document`, `text`, `formula`, `picture`, `table`, `page`, `field`), structure and search (`structure`, `cursor`, `selection`, `search`), spreadsheets (`sheet`, `embed`), review (`track_changes`, `comments`), and utilities (`save`, `bridge`, `cookbook`, `uno`)
 - **Native LibreOffice Math** (`formula`): real, editable Math objects (StarMath syntax), not text approximations
 - **Pictures** (`picture`): embed png/jpg/gif/bmp files as real inline graphics
+- **High-level capability layer**: Writer tables with totals, page setup/headers/footers, bookmarks/links/caption pairs, Calc sheets/validation/named ranges/freeze/date axes — one call each
 - **Headless by default**: the WASM engine runs inside Node (`server.mjs --node`); no browser or Chrome process
 - **Real exports**: ODT, DOCX and PDF produced by LibreOffice's own filters
 - **One active document**, driven over MCP stdio or plain HTTP/WebSocket
@@ -36,7 +37,7 @@ flowchart LR
 ```
 
 1. **Node.js Bridge (`server.mjs`)**: Listens on `http://localhost:8765` with Cross-Origin Isolation headers (`COOP`/`COEP`). It can run in **Headless Mode** (auto-spawning a silent background Wasm runner) or **Interactive Browser Mode**.
-2. **MCP Stdio Server (`mcp_stdio_server.mjs`)**: Exposes 11 tools — the 9 consolidated tools compatible with native `mcp-libre`, plus `formula` (native Math objects) and `picture` (inline graphics). Features **Zero-Config Auto-Boot** (spins up the bridge automatically on launch).
+2. **MCP Stdio Server (`mcp_stdio_server.mjs`)**: Exposes 19 tools, including the consolidated editing tools, native Math (`formula`), inline graphics (`picture`), and the high-level `table`, `page`, `field` and `sheet` operations. Features **Zero-Config Auto-Boot** (spins up the bridge automatically on launch).
 3. **WebAssembly UI (`public/index.html`)**: Connects to the bridge via WebSocket and hosts the interactive ZetaOffice canvas.
 4. **UNO Worker Thread (`public/office_thread.js`)**: Runs in the WebAssembly worker. It receives commands and manipulates the document using the real UNO API (`css.text.XTextDocument`, `text.insertString(...)`, `setPropertyValue(...)`).
 

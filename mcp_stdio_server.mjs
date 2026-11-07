@@ -2,8 +2,9 @@
 /**
  * MCP Stdio Server for ZetaJS WebAssembly LibreOffice Bridge
  * 
- * Provides the EXACT SAME 9 consolidated tool definitions and action signatures
- * as the native mcp-libre server (libreoffice_mcp_server.py).
+ * Provides the consolidated editing tools plus the high-level `table`, `page`,
+ * `field` and `sheet` capability layer, with action signatures inspired by the
+ * native mcp-libre server (libreoffice_mcp_server.py).
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -206,6 +207,20 @@ operates on that document; \`document action=create\` throws the current one awa
      puts it on its own paragraph; \`align\` is left|center|right.
 8. \`save\` \`{action:"export", file_path:"/abs/path/out.odt", export_format:"odt"}\`
    - The file is written on the MCP server's filesystem. Use an absolute path.
+
+## High-level operations (prefer these)
+
+- \`table {action:"create", values:[[...]], total_column:2}\` - native Writer
+  table; the total row uses a Writer sum formula.
+- \`page {action:"setup", orientation, margins_cm}\` and
+  \`page {action:"header_footer", header, footer, page_number}\`.
+- \`field {action:"bookmark"|"link"|"caption_pair", ...}\` - bookmarks, internal
+  links and numbered captions with a real GetReference.
+- \`sheet {action:"sheet_create"|"sheet_rename"|"sheet_activate"|"validation"|
+  "named_range"|"freeze", ...}\` - Calc structure and data rules; \`chart\` accepts
+  \`date_axis:true\`.
+- Validation serializes in xlsx; the ODS export does not write it. Freeze is a
+  view feature and may not survive headless Node export; verify.
 
 ## Presentations (Impress)
 
@@ -542,13 +557,20 @@ server.tool(
 - format(range, bold?, italic?, font_size?, align?, fill_color?, sheet?).
 - column_width(column, width_mm, sheet?): widen a column by its letter.
 - chart(data_range, chart_type?, title?, x_title?, y_title?, legend?, sheet?,
-  x?, y?, width?, height?): insert an embedded chart. data_range should include
-  the header row; its first column becomes the category (X) labels.
+  x?, y?, width?, height?, date_axis?): insert an embedded chart. data_range
+  should include the header row; its first column becomes the category (X)
+  labels. date_axis switches the X axis to a date axis.
+- sheet_create(name, index?): add a sheet.
+- sheet_rename(name, new_name): rename a sheet.
+- sheet_activate(name): make a sheet active (needed before chart/freeze).
+- validation(range, type?, source?, show_list?, sheet?): set data validation.
+- named_range(name, sheet, range): create a named range.
+- freeze(sheet?, columns?, rows?): freeze panes.
 
 The active document must be a spreadsheet: document {action:"create",
 doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
   {
-    action: z.enum(["read", "write", "format", "column_width", "chart"]).describe("Operation to perform"),
+    action: z.enum(["read", "write", "format", "column_width", "chart", "sheet_create", "sheet_rename", "sheet_activate", "validation", "named_range", "freeze"]).describe("Operation to perform"),
     sheet: z.string().optional().describe("Sheet name (default: the active sheet)"),
     range: z.string().optional().describe("Cell range like 'A1:B10' (for 'read' and 'format')"),
     start: z.string().optional().describe("Top-left cell for 'write' (default 'A1')"),
@@ -570,11 +592,21 @@ doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
     x: z.number().optional().describe("Chart X position in 1/100 mm"),
     y: z.number().optional().describe("Chart Y position in 1/100 mm"),
     width: z.number().optional().describe("Chart width in 1/100 mm"),
-    height: z.number().optional().describe("Chart height in 1/100 mm")
+    height: z.number().optional().describe("Chart height in 1/100 mm"),
+    date_axis: z.boolean().optional().describe("Use a date X axis (for 'chart')"),
+    type: z.enum(["list", "whole", "decimal", "date", "time", "text_length"]).optional().describe("Validation type (for 'validation')"),
+    source: z.string().optional().describe("Validation source/list range (for 'validation')"),
+    show_list: z.boolean().optional().describe("Show the dropdown (for 'validation')"),
+    new_name: z.string().optional().describe("New sheet name (for 'sheet_rename')"),
+    index: z.number().int().optional().describe("Insert position (for 'sheet_create')"),
+    columns: z.number().int().optional().describe("Columns to freeze (for 'freeze')"),
+    rows: z.number().int().optional().describe("Rows to freeze (for 'freeze')"),
+    name: z.string().optional().describe("Sheet or named-range name")
   },
   async ({ action, sheet, range, start, values, bold, italic, font_size, align,
            fill_color, column, width_mm, data_range, chart_type, title, x_title,
-           y_title, legend, x, y, width, height }) => {
+           y_title, legend, x, y, width, height, date_axis, type, source, show_list,
+           new_name, index, columns, rows, name }) => {
     if (action === "read") {
       if (!range) return toolError(action, "Missing 'range'.", 'Pass a range like "A1:B10".');
       return jsonResponse(await callLibreoffice("/tools/get_cells_live", "POST", { range, sheet }));
@@ -597,10 +629,30 @@ doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
       if (!data_range) return toolError(action, "Missing 'data_range'.", 'Pass the range the chart plots, e.g. "A1:B10".');
       return jsonResponse(await callLibreoffice("/tools/add_chart_live", "POST", {
         data_range, chart_type: chart_type || "line", title, x_title, y_title,
-        legend, x, y, width, height, sheet
+        legend, x, y, width, height, sheet, date_axis
       }));
+    } else if (action === "sheet_create") {
+      if (!name) return toolError(action, "Missing 'name'.", "Pass the new sheet name.");
+      return jsonResponse(await callLibreoffice("/tools/calc_sheet_live", "POST", { action: "create", name, index }));
+    } else if (action === "sheet_rename") {
+      if (!name || !new_name) return toolError(action, "Missing 'name' or 'new_name'.", "Pass both names.");
+      return jsonResponse(await callLibreoffice("/tools/calc_sheet_live", "POST", { action: "rename", name, new_name }));
+    } else if (action === "sheet_activate") {
+      if (!name) return toolError(action, "Missing 'name'.", "Pass the sheet name.");
+      return jsonResponse(await callLibreoffice("/tools/calc_sheet_live", "POST", { action: "activate", name }));
+    } else if (action === "validation") {
+      if (!range) return toolError(action, "Missing 'range'.", 'Pass the target range like "B2:B10".');
+      if (!source) return toolError(action, "Missing 'source'.", 'Pass a list/cell range like "$Sheet1.$A$1:$A$3".');
+      return jsonResponse(await callLibreoffice("/tools/calc_validation_live", "POST", {
+        range, sheet, type: type || "list", source, show_list
+      }));
+    } else if (action === "named_range") {
+      if (!name || !range) return toolError(action, "Missing 'name' or 'range'.", "Pass both.");
+      return jsonResponse(await callLibreoffice("/tools/calc_named_range_live", "POST", { name, range, sheet }));
+    } else if (action === "freeze") {
+      return jsonResponse(await callLibreoffice("/tools/calc_freeze_live", "POST", { sheet, columns, rows }));
     }
-    return toolError(action, `Invalid action '${action}'.`, "Valid actions: read, write, format, column_width, chart.");
+    return toolError(action, `Invalid action '${action}'.`, "Valid actions: read, write, format, column_width, chart, sheet_create, sheet_rename, sheet_activate, validation, named_range, freeze.");
   }
 );
 
@@ -1106,6 +1158,119 @@ save(export, export_format:"odt"|"docx"|"pdf").`,
     if (height_cm !== undefined) data.height_cm = height_cm;
     if (align) data.align = align;
     return jsonResponse(await callLibreoffice("/tools/insert_picture_live", "POST", data));
+  }
+);
+
+// =============================================================================
+// TOOL: field (high-level bookmarks, links, captions)
+// =============================================================================
+server.tool(
+  "field",
+  `High-level Writer field operations.
+
+- bookmark(name, paragraph_n?, at?): add a bookmark at the start/end of a paragraph.
+- link(paragraph_n, text?, target): make a paragraph substring (or the whole
+  paragraph) a hyperlink. target is "#bookmark" or an https:// URL.
+- caption_pair(category?, caption?, reference?, sequence_number?): append a
+  numbered caption and a real GetReference cross-reference in one call; returns
+  the rendered caption/reference strings.
+
+Captions are sequence fields numbered in document order.`,
+  {
+    action: z.enum(["bookmark", "link", "caption_pair"]).describe("Operation to perform"),
+    name: z.string().optional().describe("Bookmark name (for 'bookmark')"),
+    paragraph_n: z.number().int().optional().describe("Paragraph number, 1-indexed"),
+    at: z.enum(["start", "end"]).optional().describe("Bookmark position in the paragraph"),
+    text: z.string().optional().describe("Substring to link (default: whole paragraph)"),
+    target: z.string().optional().describe("Link target: '#bookmark' or https:// URL"),
+    category: z.string().optional().describe("Caption category (default Figure)"),
+    caption: z.string().optional().describe("Caption text after the number"),
+    reference: z.string().optional().describe("Text before the cross-reference (default 'see figure ')"),
+    sequence_number: z.number().int().optional().describe("Target caption number (default 1)")
+  },
+  async ({ action, name, paragraph_n, at, text, target, category, caption, reference, sequence_number }) => {
+    if (action === "bookmark") {
+      if (!name) return toolError(action, "Missing 'name'.", "Pass the bookmark name.");
+      return jsonResponse(await callLibreoffice("/tools/field_bookmark_live", "POST", { name, paragraph_n, at }));
+    } else if (action === "link") {
+      if (!target) return toolError(action, "Missing 'target'.", "Pass '#bookmark' or an https:// URL.");
+      return jsonResponse(await callLibreoffice("/tools/field_link_live", "POST", { paragraph_n: paragraph_n || 1, text, target, name }));
+    } else if (action === "caption_pair") {
+      return jsonResponse(await callLibreoffice("/tools/field_caption_pair_live", "POST", {
+        category, caption, reference, sequence_number
+      }));
+    }
+    return toolError(action, `Invalid action '${action}'.`, "Valid actions: bookmark, link, caption_pair.");
+  }
+);
+
+// =============================================================================
+// TOOL: page (high-level page setup)
+// =============================================================================
+server.tool(
+  "page",
+  `High-level Writer page setup and header/footer.
+
+- setup(orientation?, margins_cm?, width_mm?, height_mm?): apply to the Standard
+  page style (A4 portrait/landscape by default).
+- header_footer(header?, footer?, page_number?): turn on and fill header/footer;
+  page_number adds a live page-number field.
+
+Lengths are millimetres/centimetres.`,
+  {
+    action: z.enum(["setup", "header_footer"]).describe("Operation to perform"),
+    orientation: z.enum(["portrait", "landscape"]).optional().describe("Page orientation (for 'setup')"),
+    margins_cm: z.number().optional().describe("All margins in centimetres (for 'setup')"),
+    width_mm: z.number().optional().describe("Custom page width in millimetres"),
+    height_mm: z.number().optional().describe("Custom page height in millimetres"),
+    header: z.string().optional().describe("Header text (for 'header_footer')"),
+    footer: z.string().optional().describe("Footer text before the page number"),
+    page_number: z.boolean().optional().describe("Add a page-number field to the footer"),
+    style: z.string().optional().describe("Page style name (default Standard)")
+  },
+  async ({ action, orientation, margins_cm, width_mm, height_mm, header, footer, page_number, style }) => {
+    if (action === "setup") {
+      const data = { orientation, width_mm, height_mm, style };
+      if (margins_cm !== undefined) {
+        data.margin_left_cm = margins_cm;
+        data.margin_right_cm = margins_cm;
+        data.margin_top_cm = margins_cm;
+        data.margin_bottom_cm = margins_cm;
+      }
+      return jsonResponse(await callLibreoffice("/tools/page_setup_live", "POST", data));
+    } else if (action === "header_footer") {
+      return jsonResponse(await callLibreoffice("/tools/page_header_footer_live", "POST", {
+        header, footer, page_number, style
+      }));
+    }
+    return toolError(action, `Invalid action '${action}'.`, "Valid actions: setup, header_footer.");
+  }
+);
+
+// =============================================================================
+// TOOL: table (high-level Writer table)
+// =============================================================================
+server.tool(
+  "table",
+  `Create a native Writer table with optional computed total.
+
+- create(values, total_column?, total_label?, header?): values is a 2-D array.
+  When total_column is given, a total row is appended and that column gets a
+  Writer sum formula over the data rows. Numbers stay numbers.`,
+  {
+    action: z.enum(["create"]).describe("Operation to perform"),
+    values: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))).optional()
+      .describe("2-D array of rows (including the header row)"),
+    total_column: z.number().int().optional().describe("0-based column to total (adds a total row)"),
+    total_label: z.string().optional().describe("Label in the total row (default 'Total')"),
+    header: z.boolean().default(true).describe("The first values row is a header")
+  },
+  async ({ action, values, total_column, total_label, header }) => {
+    if (action !== "create") return toolError(action, `Invalid action '${action}'.`, "Valid actions: create.");
+    if (!Array.isArray(values) || !values.length) return toolError(action, "Missing 'values'.", "Pass a 2-D array of rows.");
+    return jsonResponse(await callLibreoffice("/tools/writer_table_live", "POST", {
+      values, total_column, total_label, header
+    }));
   }
 );
 

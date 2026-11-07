@@ -21,8 +21,9 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
 1. **Verify every void mutation.** `insertTextContent`, `setPropertyValue`,
    `add`, `remove` return nothing on success *and* on silent no-ops. Read the
    collection count or value back.
-2. **Use the high-level tools first** (`document`, `text`, `sheet`, `embed`,
-   `save`). `uno` is the escape hatch, not the default.
+2. **Use the high-level tools first** (`document`, `text`, `table`, `page`,
+   `field`, `sheet`, `embed`, `save`). `uno` is the escape hatch, not the
+   default.
 3. **`set` needs `v`** (MCP also accepts `value`). Use `null` to clear.
 4. **Properties vs accessors.** If `describe` does not list a property, look for
    `getX()` (`getAxisTitle`, `getEmbeddedObject`, `getTextTables`).
@@ -64,7 +65,13 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
 17. **Conditional formatting is a known engine gap.** The range-level
     `ConditionalFormat` entries are not serialized to ODS/XLSX in this build.
     Do not spend calls on it; note the limitation.
-18. **Verify with tool reads, not artifacts.** Read state back
+18. **Validation is xlsx-only.** `sheet {action:"validation"}` writes a real
+    list validation; the xlsx filter serializes it, the ODS filter in this
+    build does not.
+19. **Freeze needs a view.** `sheet {action:"freeze"}` is a controller
+    operation. Headless Node may have no attached view, so success does not
+    guarantee a pane in the export; verify `state="frozen"` in xlsx.
+20. **Verify with tool reads, not artifacts.** Read state back
     (`structure`, `sheet read`, `embed` counts). Do not unzip packages, run
     `pdftoppm`, or inspect screenshots to find out what happened.
 
@@ -105,7 +112,7 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
 | `server.mjs` | HTTP/WS bridge, `/quit`, `/restart`, `/tools/*` |
 | `public/office_thread.js` | worker: UNO tools, `uno` ops, embed, charts |
 | `public/index.html` | live canvas page |
-| `mcp_stdio_server.mjs` | MCP tool definitions (`document`, `text`, `sheet`, `embed`, `cookbook`, `bridge`, `uno`) |
+| `mcp_stdio_server.mjs` | MCP tool definitions (`document`, `text`, `table`, `page`, `field`, `sheet`, `embed`, `cookbook`, `bridge`, `uno`) |
 | `docs/cookbook.md` | recipes + unknown-task playbook |
 | `docs/benchmark.md` | fresh-agent benchmark protocol |
 | `scripts/bench.mjs` | run helpers (`list`, `reset`, `start`, `stop`, `summary`) |

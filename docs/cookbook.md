@@ -13,8 +13,8 @@ follow the decision tree in §8.
 This file is meant to be self-contained: a fresh agent with no earlier context
 should be able to follow it using only these tools.
 
-Tools: `document`, `text`, `sheet`, `embed`, `save`, `bridge`, `uno`
-(`root/get/set/call/query/create/describe/release/handles`).
+Tools: `document`, `text`, `table`, `page`, `field`, `sheet`, `embed`,
+`save`, `bridge`, `uno` (`root/get/set/call/query/create/describe/release/handles`).
 
 ## 0. Find a recipe
 
@@ -24,14 +24,14 @@ sub-recipe directly (topics match `##` and `###` headings).
 | Task | Look at |
 | --- | --- |
 | text, paragraphs, styles | Styled Writer document; R1–R5 |
-| tables with totals | Writer table with a computed total |
+| tables with totals | `table` tool; Writer table with a computed total |
 | math objects | Math formula |
 | embedded Calc + chart | Embedded Calc sheet with a chart |
-| Calc data, charts, freeze | Calc: header formatting; Calc: data series |
-| page size, margins, header/footer | Page setup |
+| Calc data, sheets, validation, freeze | `sheet` tool; Calc: header formatting; Calc: data series |
+| page size, margins, header/footer | `page` tool; Page setup |
 | track changes | Track changes with UNO |
 | footnotes, comments | Footnote and annotation comment |
-| captions, cross-references | Caption with a live sequence cross-reference |
+| captions, cross-references | `field` tool; Caption with a live sequence cross-reference |
 | images, watermarks | Picture; Text watermark |
 | export | Save, export, show in the browser |
 
@@ -55,6 +55,63 @@ work and never mix documents from `getCurrentComponent()` with the one you
 created.
 
 For anything not listed here, read §2–§4 and use `describe` before guessing.
+
+---
+
+## 1b. High-level capability layer
+
+Prefer these one-call operations. Drop to the UNO recipes only when an
+operation is not covered, because they encode the verified order of property
+sets and are much less error-prone.
+
+**Writer**
+
+```
+document {action:"create", doc_type:"writer"}
+text     {action:"insert", content:"Title\nBody\n"}
+table    {action:"create",
+          values:[["Item","Qty","Price"],["A",1,10],["B",2,20],["C",3,30]],
+          total_column:2}                       # native table + sum total
+page     {action:"setup", orientation:"landscape", margins_cm:1.5}
+page     {action:"header_footer", header:"Report", footer:"Page ", page_number:true}
+field    {action:"bookmark", name:"details", paragraph_n:2}
+field    {action:"link", paragraph_n:1, text:"Introduction", target:"#details"}
+field    {action:"caption_pair", category:"Figure",
+          caption:"Measured response.", reference:"see figure "}
+```
+
+`table` keeps numbers as numbers and appends a total row with a Writer
+`sum<...>` formula. `field caption_pair` appends a numbered caption plus a real
+`GetReference` field; it returns the rendered caption and reference strings.
+`field bookmark`/`link` make internal `#name` links (or external URLs).
+
+**Calc**
+
+```
+document {action:"create", doc_type:"calc"}
+sheet    {action:"sheet_create", name:"Inputs", index:0}
+sheet    {action:"sheet_rename", name:"Inputs", new_name:"Rates"}
+sheet    {action:"sheet_activate", name:"Inputs"}
+sheet    {action:"write", sheet:"Inputs", values:[["Rate"],[0.05],[0.075]]}
+sheet    {action:"named_range", name:"RateList", sheet:"Inputs", range:"A1:A3"}
+sheet    {action:"validation", sheet:"Inputs", range:"B2:B10", type:"list",
+          source:"$Inputs.$A$1:$A$3"}
+sheet    {action:"chart", sheet:"Inputs", data_range:"A1:B7", chart_type:"line",
+          date_axis:true}
+sheet    {action:"freeze", sheet:"Inputs", rows:1}
+```
+
+- The first `sheet_create` reuses the default `Sheet1` as the named sheet, so a
+  three-sheet workbook stays at three sheets.
+- `chart date_axis` changes the X axis to a real date axis (serializes as
+  `dateAx` in xlsx).
+- `validation` writes real dropdown/list validation. **The xlsx filter
+  serializes it; the ODS filter in this build does not** — export xlsx when
+  validation matters.
+- Freeze is a controller/view feature. In the headless Node runtime there may
+  be no attached view, so `freeze` can report success while the exported xlsx
+  has no pane. Verify `state="frozen"` in the xlsx; if absent, report the
+  headless limitation rather than retrying.
 
 ---
 
@@ -240,6 +297,17 @@ you need its type.
 
 ### R3 — Tables
 
+For a header + data + computed total, use the high-level tool:
+
+```
+table {action:"create",
+       values:[["Item","Qty","Price"],["A",1,10],["B",2,20]],
+       total_column:2}
+```
+
+The UNO form below is the fallback when you need custom rows, formulas or cell
+properties:
+
 ```
 table = doc.createInstance("com.sun.star.text.TextTable")
 table.initialize(rows, cols)
@@ -258,7 +326,16 @@ range (`RepeatHeadline`, `BackColor`, `CharWeight`, …). Check with `describe`.
 
 ### R4 — Fields
 
-A field is a text content created from a field service:
+Bookmarks, internal links and caption/cross-reference pairs are one call each:
+
+```
+field {action:"bookmark", name:"details", paragraph_n:2}
+field {action:"link", paragraph_n:1, text:"Introduction", target:"#details"}
+field {action:"caption_pair", category:"Figure", caption:"Result.",
+       reference:"see figure "}
+```
+
+For any other field, create it from a field service:
 
 ```
 f = doc.createInstance("com.sun.star.text.TextField.PageNumber")
@@ -272,8 +349,14 @@ the module and the interface before setting values.
 
 ### R5 — Page and section properties
 
-Page styles are the place for paper size, orientation, margins, headers and
-footers:
+Use `page` for the common cases:
+
+```
+page {action:"setup", orientation:"landscape", margins_cm:1.5}
+page {action:"header_footer", header:"Report", footer:"Page ", page_number:true}
+```
+
+Paper size, orientation, margins, headers and footers live on a page style:
 
 ```
 families = doc.getStyleFamilies()
@@ -287,6 +370,16 @@ Sections (`doc.getTextSections()`) behave like sub-documents with their own
 columns and link targets.
 
 ### R6 — Charts
+
+For a standard embedded Calc chart use:
+
+```
+sheet {action:"chart", sheet:"Monthly", data_range:"A1:B7",
+       chart_type:"line", title:"Monthly", date_axis:true}
+```
+
+`date_axis:true` makes the X axis a real date axis. The UNO form below is the
+fallback for chart types or properties the tool does not expose:
 
 Charts are document objects owned by a sheet (Calc) or by the document:
 
@@ -419,8 +512,17 @@ header row the series name. That is sufficient verification for this pattern.
 
 ### Writer table with a computed total
 
-Use `document.handle` for UNO. The number of rows and the sum range are yours;
-this example uses a header, four data rows and a total row.
+The one-call form is:
+
+```
+table {action:"create",
+       values:[["Item","Qty","Price"],["A",1,10],["B",2,20],["C",3,30]],
+       total_column:2}
+```
+
+It returns the row/column count and the computed total. Use `document.handle`
+for UNO when you need formulas in other cells. The number of rows and the sum
+range are yours; this example uses a header, four data rows and a total row.
 
 ```js
 const U = (o) => tools.zetaoffice.uno(o);
@@ -526,8 +628,15 @@ so `set_enum` is required; `set` silently leaves it at 0 (categories).
 
 ### Page setup: landscape, margins, header and page-number footer
 
+The one-call form is:
+
+```
+page {action:"setup", orientation:"landscape", margins_cm:1.5}
+page {action:"header_footer", header:"HEADER TEXT", footer:"Page ", page_number:true}
+```
+
 Page setup lives on a page **style**; header/footer are XText objects on it.
-Use `value:` for these properties.
+Use `value:` for these properties when you need a non-default style.
 
 ```js
 const U = (o) => tools.zetaoffice.uno(o);
@@ -696,7 +805,15 @@ verification.
 
 ### Caption with a live sequence cross-reference
 
-A caption number is a `SetExpression` **sequence** field; the cross-reference
+The one-call form appends a numbered caption and a cross-reference:
+
+```
+field {action:"caption_pair", category:"Figure", caption:"Result.",
+       reference:"see figure "}
+```
+
+It returns the rendered caption and reference strings. The UNO form below is
+the mechanism: a caption number is a `SetExpression` **sequence** field; the cross-reference
 is a `GetReference` field. Use `set_enum` for the numeric/enum properties: a
 typed `set` can silently leave them at 0 in this build. That includes the
 reference's `SequenceNumber` (a SHORT): it must point at the caption's number
@@ -810,39 +927,35 @@ lists. Export: ODT stores the list level styles in `styles.xml`.
 
 - **Formula separator is `;`** in this build: `=SUMIF($A$2:$A$7;E1;$B$2:$B$7)`.
   Commas give `Err:508`. The xlsx writer normalizes the syntax on export.
-- **Named range**: `doc.getNamedRanges().addNewByName("StatusList",
-  "$Sheet1.$A$1:$A$3", ...)`, then read the content back.
-- **Data validation**: set `range.Validation` to a PropertyValue sequence, e.g.
-  `Type=LIST`, `Formula1="$Sheet1.$A$1:$A$3"`, `ShowList=true`.
+- **Named range**: prefer `sheet {action:"named_range", name:"StatusList",
+  sheet:"Sheet1", range:"A1:A3"}`. By hand, read the document's `NamedRanges`
+  property and call `addNewByName(name, "$Sheet1.$A$1:$A$3", address, 0)`.
+- **Data validation**: prefer `sheet {action:"validation", range, type:"list",
+  source:"$Sheet1.$A$1:$A$3"}`. It configures `XSheetCondition2` and reattaches
+  the object; export xlsx because the ODS filter does not serialize validation.
 - **AutoFilter**: select the range and dispatch `.uno:DataFilterAutoFilter`
   with `DispatchHelper`. In xlsx this exports as a table
   (`xl/tables/*.xml` with `<autoFilter>`), not as a sheet-level element.
 
-**Validation (LIST = 6):** `ValidationType.LIST` is `6`, not 3. Create the
-validation on the range, query `XSheetCondition2`, set the formula, then assign
-the validation back to the range and read it back.
+**Validation:** use the one-call form:
 
-```js
-const v = (await U({ op: "get", h: range, name: "Validation" })).value.$h;
-const cond = (await U({ op: "query", h: v, iface: "com.sun.star.sheet.XSheetCondition2" })).value.$h;
-await U({ op: "set_enum", h: v, name: "Type", value: 6 }); // LIST
-await U({ op: "call", h: cond, name: "setFormula1", args: ["$Inputs.$A$1:$A$3"] });
-await U({ op: "set", h: v, name: "ShowList", value: true });
-await U({ op: "set", h: v, name: "IgnoreBlankCells", value: true });
-await U({ op: "call", h: range, name: "setPropertyValue", args: ["Validation", { $h: v }] });
+```
+sheet {action:"validation", sheet:"Inputs", range:"B2:B10", type:"list",
+       source:"$Inputs.$A$1:$A$3"}
 ```
 
-**Freeze panes** need an active sheet first, then the controller's
-`XViewFreezable`; the sheet argument to `freezeAtPosition(cols, rows)` counts
-columns/rows to freeze.
+The mechanism: `ValidationType.LIST` is `6`, not 3. Read the range's
+`Validation` object, query `XSheetCondition2`, `set_enum Type=LIST`, set
+`Formula1`, then reattach the object. A ZetaJS proxy cannot be placed in a
+typed `Any` directly; unwrap its `getProxyTarget` symbol first if you do this by
+hand. Export **xlsx**: the ODS filter in this build does not write
+data-validation.
 
-```js
-const ctrl = (await U({ op: "call", h, name: "getCurrentController" })).value.$h;
-await U({ op: "call", h: ctrl, name: "setActiveSheet", args: [{ $h: sheet }] });
-const fz = (await U({ op: "query", h: ctrl, iface: "com.sun.star.sheet.XViewFreezable" })).value.$h;
-await U({ op: "call", h: fz, name: "freezeAtPosition", args: [0, 1] });
-const frozen = (await U({ op: "get", h: ctrl, name: "HasFrozenPanes" })).value;
-```
+**Freeze panes:** use `sheet {action:"freeze", sheet:"Summary", rows:1}`.
+The mechanism is `setActiveSheet` then the controller's `XViewFreezable`
+`freezeAtPosition(cols, rows)`. Freezing needs an attached view; in the headless
+Node worker it can be a no-op at export. Verify a pane in the xlsx before
+claiming it.
 
 **Multi-sheet formulas** use `Sheet.Cell` notation in this build:
 `=SUM(Monthly.B2:B7)` / `=AVERAGE(Monthly.B2:B7)`; export normalizes them.
@@ -964,6 +1077,9 @@ Common dead ends and their fix:
 | Float property rejects a number | integer became Long | use `{"$f":1.5}` for floats |
 | Conditional format vanishes on export | `range.ConditionalFormat.addNew()` accepts the entry but it is not attached to the sheet model in this build; the ODS/XLSX writers emit nothing | known engine gap (B3): report it instead of retrying; `XConditionalFormats.createByRange` needs an `XSheetCellRanges` that is not reachable here |
 | `set` on an enum property leaves it at 0 | the enum type name is not registered in this build, so a typed Any cannot be built by name | use `uno {op:"set_enum", h, name, value:<number>}`: it takes the Type from the runtime property descriptor |
+| Validation exists but is absent from an ODS | the ODS filter does not serialize data-validation in this build | export xlsx; verify `<dataValidation ... type="list">` |
+| Freeze reports success but xlsx has no pane | the headless Node runtime has no attached view for `XViewFreezable` | verify `state="frozen"`; if absent, report the headless limitation instead of retrying |
+| `Any` rejects a ZetaJS proxy with `uno_Reference_...` | proxies wrap the embind object; `Any` needs the target | unwrap with the `getProxyTarget` symbol (the `setValidation` helper shows the pattern) |
 
 ---
 

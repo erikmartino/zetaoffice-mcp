@@ -255,6 +255,309 @@ function applyParagraphStyle(doc, cursor, styleName) {
   return resolved;
 }
 
+// ─── High-level capability helpers ─────────────────────────────────────────
+// Small typed operations over the UNO sequences the cookbook documents.
+
+function requireSheetDoc() {
+  const doc = getDoc();
+  if (!doc) throw new Error('No active document available');
+  if (typeof doc.getSheets !== 'function') throw new Error('Active document is not a spreadsheet');
+  return doc;
+}
+
+function getPageStyle(doc, name) {
+  const fams = doc.getStyleFamilies();
+  const pages = fams.getByName('PageStyles');
+  return pages.getByName(name || 'Standard');
+}
+
+function setEnumProp(obj, name, value) {
+  const info = obj.getPropertySetInfo();
+  const prop = info.getPropertyByName(name);
+  const any = new Module.uno_Any(prop.Type, value);
+  try { obj.setPropertyValue(name, any); } finally { any.delete(); }
+}
+
+function updateAllFields(doc) {
+  try {
+    const sm = zHT.context.getServiceManager();
+    const helper = sm.createInstanceWithContext('com.sun.star.frame.DispatchHelper', zHT.context);
+    const frame = doc.getCurrentController().getFrame();
+    helper.executeDispatch(frame, '.uno:UpdateFields', '_self', 0, []);
+  } catch (e) {
+    console.warn('[ZetaJS Worker] UpdateFields:', e.message);
+  }
+}
+
+function getFieldMaster(doc, category) {
+  const name = `com.sun.star.text.fieldmaster.SetExpression.${category}`;
+  try {
+    return doc.getTextFieldMasters().getByName(name);
+  } catch (e) {
+    throw new Error(`No field master for category '${category}'. Try Figure, Illustration, Table, Text or Drawing.`);
+  }
+}
+
+function fieldPresentations(doc, seq, ref) {
+  const presentation = (field) => {
+    try { return field.getPresentation(false); } catch (e) { return null; }
+  };
+  return { caption: presentation(seq), reference: presentation(ref) };
+}
+
+function addCaptionPair(doc, params) {
+  const category = String(params.category || 'Figure');
+  const caption = String(params.caption || 'Caption text.');
+  const referenceText = String(params.reference || 'see figure ');
+  const sequenceNumber = params.sequence_number === undefined ? 1 : Number(params.sequence_number);
+  const textObj = doc.getText();
+  const cursor = textObj.createTextCursor();
+  cursor.gotoEnd(false);
+  cursor.collapseToEnd();
+  if (textObj.getString().length > 0) insertParagraphAware(textObj, cursor, '\n');
+
+  textObj.insertString(cursor, category + ' ', false);
+  const seq = doc.createInstance('com.sun.star.text.textfield.SetExpression');
+  seq.attachTextFieldMaster(getFieldMaster(doc, category));
+  setEnumProp(seq, 'SubType', 1);
+  setUnoProp(seq, 'Content', Module.uno_Type.String(), category + '+1');
+  setEnumProp(seq, 'NumberingType', 4);
+  setEnumProp(seq, 'SequenceValue', sequenceNumber);
+  textObj.insertTextContent(cursor, seq, false);
+  textObj.insertString(cursor, ': ' + caption, false);
+  insertParagraphAware(textObj, cursor, '\n');
+  textObj.insertString(cursor, referenceText, false);
+
+  const ref = doc.createInstance('com.sun.star.text.textfield.GetReference');
+  setEnumProp(ref, 'ReferenceFieldSource', 1); // SEQUENCE_FIELD
+  setUnoProp(ref, 'SourceName', Module.uno_Type.String(), category);
+  setEnumProp(ref, 'ReferenceFieldPart', 7);   // ONLY_SEQUENCE_NUMBER
+  setEnumProp(ref, 'SequenceNumber', sequenceNumber);
+  textObj.insertTextContent(cursor, ref, false);
+  updateAllFields(doc);
+  return { category, caption, referenceText, ...fieldPresentations(doc, seq, ref) };
+}
+
+function addBookmark(doc, params) {
+  const ranges = getParagraphRanges(doc);
+  const n = params.paragraph_n ? Number(params.paragraph_n) : ranges.length;
+  const r = ranges[n - 1];
+  if (!r) throw new Error(`Paragraph ${n} out of range`);
+  const at = String(params.at || 'start').toLowerCase();
+  const pos = at === 'end' ? r.end : r.start;
+  const cursor = makeCursorRange(doc, pos, pos);
+  const name = String(params.name || 'bookmark');
+  try { doc.getBookmarks().removeByName(name); } catch (e) { /* absent */ }
+  const bm = doc.createInstance('com.sun.star.text.Bookmark');
+  bm.setName(name);
+  doc.getText().insertTextContent(cursor, bm, false);
+  const names = toArray(doc.getBookmarks().getElementNames());
+  return { name, paragraph: n, names };
+}
+
+function addInternalLink(doc, params) {
+  const ranges = getParagraphRanges(doc);
+  const n = Number(params.paragraph_n || 1);
+  const r = ranges[n - 1];
+  if (!r) throw new Error(`Paragraph ${n} out of range`);
+  const needle = params.text ? String(params.text) : r.text;
+  const idx = params.text ? r.text.indexOf(needle) : 0;
+  if (idx < 0) throw new Error(`Text '${needle}' not found in paragraph ${n}`);
+  const start = r.start + idx;
+  const cursor = makeCursorRange(doc, start, start + needle.length);
+  const target = String(params.target || '');
+  if (!target) throw new Error("Missing 'target' (e.g. '#details' or https://...)");
+  setUnoProp(cursor, 'HyperLinkURL', Module.uno_Type.String(), target);
+  if (target.startsWith('#') && params.name) {
+    setUnoProp(cursor, 'HyperLinkName', Module.uno_Type.String(), String(params.name));
+  }
+  return { paragraph: n, text: needle, url: target };
+}
+
+function sheetByName(doc, name) {
+  const sheets = doc.getSheets();
+  return name ? sheets.getByName(String(name)) : sheets.getByIndex(0);
+}
+
+function calcSheetOp(params) {
+  const doc = requireSheetDoc();
+  const sheets = doc.getSheets();
+  const action = String(params.action || 'create');
+  if (action === 'create') {
+    const name = String(params.name || 'Sheet');
+    if (!sheets.hasByName(name)) {
+      if (sheets.getCount() === 1 && sheets.getByIndex(0).getName() === 'Sheet1') {
+        sheets.getByIndex(0).setName(name);
+      } else {
+        const index = params.index === undefined ? sheets.getCount() : Number(params.index);
+        sheets.insertNewByName(name, index);
+      }
+    }
+  } else if (action === 'rename') {
+    sheets.getByName(String(params.name)).setName(String(params.new_name));
+  } else if (action === 'activate') {
+    doc.getCurrentController().setActiveSheet(sheetByName(doc, params.name));
+  } else {
+    throw new Error(`Unknown sheet action '${action}'`);
+  }
+  let active = null;
+  try { active = doc.getCurrentController().getActiveSheet().getName(); } catch (e) { active = null; }
+  return { sheets: toArray(sheets.getElementNames()), active };
+}
+
+function unoRawProxy(obj) {
+  const sym = Object.getOwnPropertySymbols(obj)
+    .find((s) => s.description === 'getProxyTarget');
+  return sym ? obj[sym] : null;
+}
+
+function setValidation(params) {
+  const doc = requireSheetDoc();
+  const sheet = sheetByName(doc, params.sheet);
+  const range = sheet.getCellRangeByName(String(params.range));
+  const type = String(params.type || 'list').toUpperCase();
+  const validationTypes = { WHOLE: 1, DECIMAL: 2, DATE: 3, TIME: 4, TEXT_LENGTH: 5, LIST: 6 };
+  if (!validationTypes[type]) throw new Error(`Unknown validation type '${params.type}'`);
+
+  const v = range.getPropertyValue('Validation');
+  const cond = queryInterface(v, 'com.sun.star.sheet.XSheetCondition2');
+  setEnumProp(v, 'Type', unoResolveType('com.sun.star.sheet.ValidationType')[type]);
+  cond.setFormula1(String(params.source || ''));
+  setUnoProp(v, 'ShowList', Module.uno_Type.Boolean(), params.show_list !== false);
+  setUnoProp(v, 'IgnoreBlankCells', Module.uno_Type.Boolean(), true);
+
+  // Any() needs an embind reference, not a ZetaJS proxy. Unwrap the proxy's
+  // getProxyTarget symbol, then reattach the object so the range serializes it.
+  const raw = unoRawProxy(v);
+  if (!raw) throw new Error('Cannot unwrap the Validation object');
+  const any = new Module.uno_Any(
+    Module.uno_Type.Interface('com.sun.star.uno.XInterface'), raw);
+  try {
+    range.setPropertyValue('Validation', any);
+  } finally {
+    any.delete();
+  }
+  const check = range.getPropertyValue('Validation');
+  const checkCond = queryInterface(check, 'com.sun.star.sheet.XSheetCondition2');
+  return {
+    range: params.range,
+    type,
+    formula1: checkCond.getFormula1(),
+    showList: check.getPropertyValue('ShowList'),
+  };
+}
+
+function addNamedRange(params) {
+  const doc = requireSheetDoc();
+  const sheetName = String(params.sheet || doc.getSheets().getByIndex(0).getName());
+  const range = String(params.range || 'A1:A3').replace(/([A-Za-z]+)(\d+)/g, '$$$1$$$2');
+  const content = `$${sheetName}.${range}`;
+  const named = doc.getPropertyValue('NamedRanges');
+  try { named.removeByName(String(params.name)); } catch (e) { /* absent */ }
+  named.addNewByName(String(params.name), content, new css.table.CellAddress({ Sheet: 0, Column: 0, Row: 0 }), 0);
+  return { name: params.name, content, names: toArray(named.getElementNames()) };
+}
+
+function freezePanes(params) {
+  const doc = requireSheetDoc();
+  const ctrl = doc.getCurrentController();
+  if (params.sheet) ctrl.setActiveSheet(sheetByName(doc, params.sheet));
+  const fz = queryInterface(ctrl, 'com.sun.star.sheet.XViewFreezable');
+  const cols = Number(params.columns || 0);
+  const rows = Number(params.rows === undefined ? 1 : params.rows);
+  fz.freezeAtPosition(cols, rows);
+  let frozen = null;
+  try { frozen = ctrl.getPropertyValue('HasFrozenPanes'); } catch (e) { frozen = null; }
+  const result = { columns: cols, rows, frozen };
+  if (frozen === null || frozen === undefined) {
+    result.warning = 'No attached view reported frozen panes; the headless Node export may omit the pane. Verify state=\"frozen\" in the xlsx.';
+  }
+  return result;
+}
+
+function setPageSetup(params) {
+  const doc = requireTextDoc();
+  const style = getPageStyle(doc, params.style || 'Standard');
+  const landscape = String(params.orientation || '').toLowerCase() === 'landscape';
+  const width = params.width_mm ? Math.round(Number(params.width_mm) * 100) : (landscape ? 29700 : 21000);
+  const height = params.height_mm ? Math.round(Number(params.height_mm) * 100) : (landscape ? 21000 : 29700);
+  setUnoProp(style, 'IsLandscape', Module.uno_Type.Boolean(), landscape);
+  setUnoProp(style, 'Width', Module.uno_Type.Long(), width);
+  setUnoProp(style, 'Height', Module.uno_Type.Long(), height);
+  const margin = (cm, fallback) => Math.round((cm === undefined ? fallback : Number(cm)) * 1000);
+  setUnoProp(style, 'LeftMargin', Module.uno_Type.Long(), margin(params.margin_left_cm, 2));
+  setUnoProp(style, 'RightMargin', Module.uno_Type.Long(), margin(params.margin_right_cm, 2));
+  setUnoProp(style, 'TopMargin', Module.uno_Type.Long(), margin(params.margin_top_cm, 2));
+  setUnoProp(style, 'BottomMargin', Module.uno_Type.Long(), margin(params.margin_bottom_cm, 2));
+  return { landscape, width_mm: width / 100, height_mm: height / 100 };
+}
+
+function setHeaderFooter(params) {
+  const doc = requireTextDoc();
+  const style = getPageStyle(doc, params.style || 'Standard');
+  if (params.header !== undefined) {
+    setUnoProp(style, 'HeaderIsOn', Module.uno_Type.Boolean(), true);
+    const ht = style.getPropertyValue('HeaderText');
+    const cur = ht.createTextCursor();
+    cur.gotoEnd(false); cur.collapseToEnd();
+    ht.insertString(cur, String(params.header), false);
+  }
+  if (params.footer !== undefined || params.page_number) {
+    setUnoProp(style, 'FooterIsOn', Module.uno_Type.Boolean(), true);
+    const ft = style.getPropertyValue('FooterText');
+    const cur = ft.createTextCursor();
+    cur.gotoEnd(false); cur.collapseToEnd();
+    if (params.footer) ft.insertString(cur, String(params.footer), false);
+    if (params.page_number) {
+      const field = doc.createInstance('com.sun.star.text.TextField.PageNumber');
+      setEnumProp(field, 'NumberingType', 4);
+      ft.insertTextContent(cur, field, false);
+    }
+  }
+  let header = null, footer = null;
+  try { header = style.getPropertyValue('HeaderText').getString(); } catch (e) {}
+  try { footer = style.getPropertyValue('FooterText').getString(); } catch (e) {}
+  return { header, footer };
+}
+
+function createWriterTable(params) {
+  const doc = requireTextDoc();
+  const values = Array.isArray(params.values) ? params.values : [];
+  if (!values.length) throw new Error("Missing 'values' (2-D array)");
+  const cols = Math.max(1, ...values.map((r) => (Array.isArray(r) ? r.length : 1)));
+  const totalCol = params.total_column === undefined ? null : Number(params.total_column);
+  const rows = values.length + (totalCol === null ? 0 : 1);
+  const textObj = doc.getText();
+  const cursor = textObj.createTextCursor();
+  cursor.gotoEnd(false); cursor.collapseToEnd();
+  const table = doc.createInstance('com.sun.star.text.TextTable');
+  table.initialize(rows, cols);
+  textObj.insertTextContent(cursor, table, false);
+
+  const put = (r, c, v) => {
+    const cell = table.getCellByName(columnLetters(c) + (r + 1));
+    if (typeof v === 'number') cell.setValue(v);
+    else cell.setString(v === null || v === undefined ? '' : String(v));
+  };
+  for (let r = 0; r < values.length; r++) {
+    const row = Array.isArray(values[r]) ? values[r] : [values[r]];
+    for (let c = 0; c < cols; c++) put(r, c, row[c]);
+  }
+  let total = null;
+  if (totalCol !== null) {
+    const totalRow = rows - 1;
+    put(totalRow, 0, params.total_label || 'Total');
+    const col = columnLetters(totalCol);
+    const dataStart = params.header === false ? 1 : 2;
+    const dataEnd = values.length;
+    const formula = `sum<${col}${dataStart}:${col}${dataEnd}>`;
+    const cell = table.getCellByName(col + (totalRow + 1));
+    cell.setFormula(formula);
+    total = cell.getValue();
+  }
+  return { rows, cols, total };
+}
+
 // ─── Native Math formulas (embedded OLE objects) ────────────────────────────
 // A Writer formula is a real com.sun.star.text.TextEmbeddedObject whose CLSID
 // points at LibreOffice Math. The embedded model exposes the StarMath source
@@ -2019,6 +2322,12 @@ zHT.thrPort.onmessage = (event) => {
         if (params.legend === false) {
           try { setUnoProp(chart, 'HasLegend', Module.uno_Type.Boolean(), false); } catch (e) { /* optional */ }
         }
+        if (params.date_axis) {
+          try {
+            const axis = diagram ? diagram.getXAxis() : null;
+            if (axis) setEnumProp(axis, 'AxisType', 2); // DATE
+          } catch (e) { console.log('[Chart] date axis:', e.message); }
+        }
 
         result = {
           success: true,
@@ -2461,6 +2770,54 @@ zHT.thrPort.onmessage = (event) => {
         const range = doc.getText().createTextCursorByRange(el);
         applyCharFormat(range, params.formatting || {});
         result = { success: true, message: `Formatted paragraph ${n} text`, n };
+        break;
+      }
+
+      // --- High-level field operations ---
+      case 'field_bookmark_live': {
+        result = { success: true, ...addBookmark(requireTextDoc(), params) };
+        break;
+      }
+      case 'field_link_live': {
+        result = { success: true, ...addInternalLink(requireTextDoc(), params) };
+        break;
+      }
+      case 'field_caption_pair_live': {
+        result = { success: true, ...addCaptionPair(requireTextDoc(), params) };
+        break;
+      }
+
+      // --- High-level Calc operations ---
+      case 'calc_sheet_live': {
+        result = { success: true, ...calcSheetOp(params) };
+        break;
+      }
+      case 'calc_validation_live': {
+        result = { success: true, ...setValidation(params) };
+        break;
+      }
+      case 'calc_named_range_live': {
+        result = { success: true, ...addNamedRange(params) };
+        break;
+      }
+      case 'calc_freeze_live': {
+        result = { success: true, ...freezePanes(params) };
+        break;
+      }
+
+      // --- High-level page setup ---
+      case 'page_setup_live': {
+        result = { success: true, ...setPageSetup(params) };
+        break;
+      }
+      case 'page_header_footer_live': {
+        result = { success: true, ...setHeaderFooter(params) };
+        break;
+      }
+
+      // --- High-level Writer table ---
+      case 'writer_table_live': {
+        result = { success: true, ...createWriterTable(params) };
         break;
       }
 
