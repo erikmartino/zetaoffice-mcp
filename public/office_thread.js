@@ -571,6 +571,56 @@ function setUnoProp(obj, name, unoType, value) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Spreadsheet (Calc) helpers
+function resolveSheet(doc, name) {
+  if (!doc || typeof doc.getSheets !== 'function') {
+    throw new Error('Active document is not a spreadsheet (create it with document doc_type "calc")');
+  }
+  const sheets = doc.getSheets();
+  if (name) {
+    if (typeof sheets.hasByName === 'function' && !sheets.hasByName(name)) {
+      throw new Error(`No sheet named '${name}'`);
+    }
+    return sheets.getByName(name);
+  }
+  try {
+    const ctrl = doc.getCurrentController();
+    if (ctrl && typeof ctrl.getActiveSheet === 'function') return ctrl.getActiveSheet();
+  } catch (e) { /* fall through */ }
+  return sheets.getByIndex(0);
+}
+
+// "B7" -> { col: 1, row: 6 }
+function a1ToPos(a1) {
+  const m = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(String(a1 || '').trim());
+  if (!m) throw new Error(`Invalid cell address '${a1}'`);
+  let col = 0;
+  const letters = m[1].toUpperCase();
+  for (let i = 0; i < letters.length; i++) col = col * 26 + (letters.charCodeAt(i) - 64);
+  return { col: col - 1, row: parseInt(m[2], 10) - 1 };
+}
+
+function writeGrid(range, values) {
+  const width = Math.max(1, ...values.map((r) => (Array.isArray(r) ? r.length : 1)));
+  const grid = values.map((row) => {
+    const cells = Array.isArray(row) ? row.slice() : [row];
+    while (cells.length < width) cells.push('');
+    return cells.map((v) => (v === null || v === undefined) ? '' : v);
+  });
+  range.setDataArray(grid);
+  // setDataArray stores "=..." as text; promote those cells to real formulas.
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      const v = grid[r][c];
+      if (typeof v === 'string' && v.startsWith('=')) {
+        range.getCellByPosition(c, r).setFormula(v);
+      }
+    }
+  }
+  return { rows: grid.length, cols: width };
+}
+
 // Query an interface from a ZetaJS proxy object via its queryInterface method.
 function queryInterface(obj, ifaceName) {
   const t = Module.uno_Type.Interface(ifaceName);
@@ -1445,6 +1495,161 @@ zHT.thrPort.onmessage = (event) => {
           doc_type: currentDocType,
           title: currentDocTitle,
           bytes: bytes ? bytes.length : undefined,
+        };
+        break;
+      }
+
+      case 'set_cells_live': {
+        const doc = getDoc();
+        const sheet = resolveSheet(doc, params.sheet);
+        if (!Array.isArray(params.values)) {
+          throw new Error("set_cells_live requires 'values' (a 2-D array of rows)");
+        }
+        const { col, row } = a1ToPos(params.start || 'A1');
+        const height = Math.max(1, params.values.length);
+        const width = Math.max(1, ...params.values.map((r) => (Array.isArray(r) ? r.length : 1)));
+        const range = sheet.getCellRangeByPosition(col, row, col + width - 1, row + height - 1);
+        const written = writeGrid(range, params.values);
+        result = {
+          success: true,
+          message: `Wrote ${written.rows} row(s) x ${written.cols} column(s) at ${params.start || 'A1'}`,
+          sheet: params.sheet || null,
+          start: params.start || 'A1',
+          ...written,
+        };
+        break;
+      }
+
+      case 'get_cells_live': {
+        const doc = getDoc();
+        const sheet = resolveSheet(doc, params.sheet);
+        const address = params.range || 'A1:B10';
+        const range = sheet.getCellRangeByName(address);
+        result = {
+          success: true,
+          sheet: params.sheet || null,
+          range: address,
+          values: range.getDataArray(),
+        };
+        break;
+      }
+
+      case 'format_range_live': {
+        const doc = getDoc();
+        const sheet = resolveSheet(doc, params.sheet);
+        const range = sheet.getCellRangeByName(params.range);
+        if (params.bold !== undefined) {
+          setUnoProp(range, 'CharWeight', Module.uno_Type.Float(), params.bold ? 150 : 100);
+        }
+        if (params.italic !== undefined) {
+          setUnoProp(range, 'CharPosture', Module.uno_Type.Enum('com.sun.star.awt.FontSlant'), params.italic ? 2 : 0);
+        }
+        if (params.font_size) {
+          setUnoProp(range, 'CharHeight', Module.uno_Type.Float(), Number(params.font_size));
+        }
+        if (params.align) {
+          const alignMap = { left: 0, center: 2, right: 1 };
+          setUnoProp(range, 'HoriJustify', Module.uno_Type.Enum('com.sun.star.table.CellHoriJustify'), alignMap[params.align]);
+        }
+        if (params.fill_color) {
+          setUnoProp(range, 'CellBackColor', Module.uno_Type.Long(),
+            parseInt(String(params.fill_color).replace('#', ''), 16));
+        }
+        result = { success: true, message: `Formatted ${params.range}` };
+        break;
+      }
+
+      case 'set_column_width_live': {
+        const doc = getDoc();
+        const sheet = resolveSheet(doc, params.sheet);
+        const { col } = a1ToPos(String(params.column || 'A').replace(/\d+$/, '') + '1');
+        const width = Math.round(Number(params.width_mm || 25) * 100); // 1/100 mm
+        setUnoProp(sheet.getColumns().getByIndex(col), 'Width', Module.uno_Type.Long(), width);
+        result = { success: true, message: `Column ${params.column || 'A'} width set to ${params.width_mm || 25} mm` };
+        break;
+      }
+
+      case 'add_chart_live': {
+        const doc = getDoc();
+        if (!doc || typeof doc.getSheets !== 'function') {
+          throw new Error('Active document is not a spreadsheet');
+        }
+        const sheet = resolveSheet(doc, params.sheet);
+        const charts = sheet.getCharts();
+        const name = params.name || ('Chart' + (charts.getCount() + 1));
+        if (typeof charts.hasByName === 'function' && charts.hasByName(name)) charts.removeByName(name);
+
+        const rect = new css.awt.Rectangle({
+          X: Math.round(params.x !== undefined ? params.x : 12000),
+          Y: Math.round(params.y !== undefined ? params.y : 1200),
+          Width: Math.round(params.width !== undefined ? params.width : 17000),
+          Height: Math.round(params.height !== undefined ? params.height : 9500),
+        });
+        const range = sheet.getCellRangeByName(params.data_range || 'A1:B10');
+        // Some LibreOffice builds expose a fifth aRowHeaders parameter; pass it
+        // so the first column (dates) becomes the category axis, and fall back
+        // to the 4-argument IDL on builds that do not.
+        try {
+          charts.addNewByName(name, rect, [range.getRangeAddress()],
+            params.column_headers !== false, params.row_headers !== false);
+        } catch (e) {
+          if (!/number of arguments/i.test(e.message || '')) throw e;
+          charts.addNewByName(name, rect, [range.getRangeAddress()], params.column_headers !== false);
+        }
+
+        const chart = charts.getByName(name).getEmbeddedObject();
+        const diagramService = {
+          line: 'com.sun.star.chart.LineDiagram',
+          column: 'com.sun.star.chart.BarDiagram',
+          bar: 'com.sun.star.chart.BarDiagram',
+          area: 'com.sun.star.chart.AreaDiagram',
+          pie: 'com.sun.star.chart.PieDiagram',
+          scatter: 'com.sun.star.chart.XYDiagram',
+        }[String(params.chart_type || 'line').toLowerCase()];
+        if (diagramService) chart.createInstance(diagramService);
+
+        if (params.title) {
+          try { setUnoProp(chart, 'HasMainTitle', Module.uno_Type.Boolean(), true); } catch (e) { /* optional */ }
+          try {
+            const titleObj = chart.getTitle();
+            // XTitle exposes its text as the String property in this build.
+            setUnoProp(titleObj, 'String', Module.uno_Type.String(), String(params.title));
+          } catch (e) {
+            console.log('[Chart] title:', e.message);
+          }
+        }
+        let diagram = null;
+        try { diagram = chart.getDiagram(); } catch (e) { /* optional */ }
+        const setAxisTitle = (axisName, text) => {
+          if (!diagram || !text) return;
+          const axis = axisName === 'x' ? diagram.getXAxis() : diagram.getYAxis();
+          try {
+            // ChartAxis exposes the caption through getAxisTitle() -> XTitle.
+            const titleObj = axis.getAxisTitle();
+            if (!titleObj) return;
+            try {
+              setUnoProp(titleObj, 'String', Module.uno_Type.String(), String(text));
+            } catch (e) {
+              console.log(`[Chart] ${axisName} axisTitle.String:`, e.message);
+            }
+          } catch (e) {
+            console.log(`[Chart] ${axisName} getAxisTitle:`, e.message);
+          }
+        };
+        if (params.x_title) setAxisTitle('x', params.x_title);
+        if (params.y_title) setAxisTitle('y', params.y_title);
+        if (diagram) {
+          try { setUnoProp(diagram.getXAxis(), 'TextRotation', Module.uno_Type.Long(), 45); } catch (e) { /* cosmetic */ }
+        }
+        if (params.legend === false) {
+          try { setUnoProp(chart, 'HasLegend', Module.uno_Type.Boolean(), false); } catch (e) { /* optional */ }
+        }
+
+        result = {
+          success: true,
+          message: `Added ${params.chart_type || 'line'} chart '${name}'`,
+          chart: name,
+          data_range: params.data_range,
         };
         break;
       }

@@ -167,8 +167,10 @@ async function syncDocumentToBrowser(browserWs) {
   if (!node) return;
   try {
     const info = await requestOnClient(node, 'get_document_info_live', {}, 15000).catch(() => null);
-    if (info && info.character_count === 0) return;
     const type = (info && info.type) || 'writer';
+    // Only a Writer document can be judged empty by character count; Calc and
+    // Impress documents report 0 characters even when they hold data.
+    if (type === 'writer' && info && info.character_count === 0) return;
     const format = { writer: 'odt', calc: 'ods', impress: 'odp', draw: 'odg' }[type] || 'odt';
     const exported = await requestOnClient(node, 'export_document_live', { format }, 25000);
     if (!exported || !exported.data) {
@@ -423,15 +425,16 @@ const server = http.createServer(async (req, res) => {
   // Trigger desktop browser window
   if ((pathname === '/tools/open_browser_live' || pathname === '/open_browser') && (req.method === 'POST' || req.method === 'GET')) {
     const baseUrl = `http://localhost:${PORT}`;
+    const forceNewTab = parsedUrl.searchParams.get('force') === '1';
     // Wait briefly for an already-open tab to finish booting; otherwise open a
     // fresh one. The cache-busting query makes desktop browsers create a new tab
     // even when the plain URL is already open in a stale one.
     let waited = 0;
-    while (waited < 6000 && !getReadyBrowserClient()) {
+    while (!forceNewTab && waited < 6000 && !getReadyBrowserClient()) {
       await new Promise((r) => setTimeout(r, 250));
       waited += 250;
     }
-    const alreadyConnected = !!getReadyBrowserClient();
+    const alreadyConnected = !forceNewTab && !!getReadyBrowserClient();
     let opened = true;
     const url = alreadyConnected ? baseUrl : `${baseUrl}/?t=${Date.now()}`;
     if (!alreadyConnected) opened = openDesktopBrowser(url);
@@ -503,7 +506,13 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const client = getActiveClient();
+      // Optional ?target=node|browser pins the request to one Wasm host. The
+      // visible tab is otherwise preferred; node is useful to build documents
+      // headlessly and mirror them later.
+      const target = (parsedUrl.searchParams.get('target') || '').toLowerCase();
+      const client = target === 'node' ? getNodeRuntimeClient()
+        : target === 'browser' ? getReadyBrowserClient()
+        : getActiveClient();
       if (!client) {
         res.writeHead(503, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({

@@ -515,6 +515,81 @@ immediately before text(format) and check the returned selection
 );
 
 // =============================================================================
+// SPREADSHEET TOOL: sheet (Calc cells, formatting, charts)
+// =============================================================================
+server.tool(
+  "sheet",
+  `Read and write cells in the active Calc spreadsheet and add charts.
+
+- read(range, sheet?): 2-D array of values for a range like "A1:B10".
+- write(values, start?, sheet?): write a 2-D array of rows; numbers stay numbers,
+  and strings starting with "=" become real formulas.
+- format(range, bold?, italic?, font_size?, align?, fill_color?, sheet?).
+- column_width(column, width_mm, sheet?): widen a column by its letter.
+- chart(data_range, chart_type?, title?, x_title?, y_title?, legend?, sheet?,
+  x?, y?, width?, height?): insert an embedded chart. data_range should include
+  the header row; its first column becomes the category (X) labels.
+
+The active document must be a spreadsheet: document {action:"create",
+doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
+  {
+    action: z.enum(["read", "write", "format", "column_width", "chart"]).describe("Operation to perform"),
+    sheet: z.string().optional().describe("Sheet name (default: the active sheet)"),
+    range: z.string().optional().describe("Cell range like 'A1:B10' (for 'read' and 'format')"),
+    start: z.string().optional().describe("Top-left cell for 'write' (default 'A1')"),
+    values: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))).optional()
+      .describe("2-D array of rows (for 'write')"),
+    bold: z.boolean().optional().describe("Bold text (for 'format')"),
+    italic: z.boolean().optional().describe("Italic text (for 'format')"),
+    font_size: z.number().optional().describe("Font size in points (for 'format')"),
+    align: z.enum(["left", "center", "right"]).optional().describe("Horizontal alignment (for 'format')"),
+    fill_color: z.string().optional().describe("#RRGGBB cell background (for 'format')"),
+    column: z.string().optional().describe("Column letter for 'column_width'"),
+    width_mm: z.number().optional().describe("Column width in millimetres (for 'column_width')"),
+    data_range: z.string().optional().describe("Data range for 'chart', including the header row"),
+    chart_type: z.enum(["line", "column", "bar", "area", "pie", "scatter"]).optional().describe("Chart type (default line)"),
+    title: z.string().optional().describe("Chart title"),
+    x_title: z.string().optional().describe("Category (X) axis title"),
+    y_title: z.string().optional().describe("Value (Y) axis title"),
+    legend: z.boolean().optional().describe("Show the legend (default true)"),
+    x: z.number().optional().describe("Chart X position in 1/100 mm"),
+    y: z.number().optional().describe("Chart Y position in 1/100 mm"),
+    width: z.number().optional().describe("Chart width in 1/100 mm"),
+    height: z.number().optional().describe("Chart height in 1/100 mm")
+  },
+  async ({ action, sheet, range, start, values, bold, italic, font_size, align,
+           fill_color, column, width_mm, data_range, chart_type, title, x_title,
+           y_title, legend, x, y, width, height }) => {
+    if (action === "read") {
+      if (!range) return toolError(action, "Missing 'range'.", 'Pass a range like "A1:B10".');
+      return jsonResponse(await callLibreoffice("/tools/get_cells_live", "POST", { range, sheet }));
+    } else if (action === "write") {
+      if (!Array.isArray(values) || !values.length) {
+        return toolError(action, "Missing 'values'.", "Pass a 2-D array of rows, e.g. [[\"Date\",\"Weight\"],[\"2026-01-01\",1500]].");
+      }
+      return jsonResponse(await callLibreoffice("/tools/set_cells_live", "POST", { values, start: start || "A1", sheet }));
+    } else if (action === "format") {
+      if (!range) return toolError(action, "Missing 'range'.", 'Pass a range like "A1:B1".');
+      return jsonResponse(await callLibreoffice("/tools/format_range_live", "POST", {
+        range, sheet, bold, italic, font_size, align, fill_color
+      }));
+    } else if (action === "column_width") {
+      if (!column) return toolError(action, "Missing 'column'.", "Pass a column letter such as 'A'.");
+      return jsonResponse(await callLibreoffice("/tools/set_column_width_live", "POST", {
+        column, width_mm: width_mm || 25, sheet
+      }));
+    } else if (action === "chart") {
+      if (!data_range) return toolError(action, "Missing 'data_range'.", 'Pass the range the chart plots, e.g. "A1:B10".');
+      return jsonResponse(await callLibreoffice("/tools/add_chart_live", "POST", {
+        data_range, chart_type: chart_type || "line", title, x_title, y_title,
+        legend, x, y, width, height, sheet
+      }));
+    }
+    return toolError(action, `Invalid action '${action}'.`, "Valid actions: read, write, format, column_width, chart.");
+  }
+);
+
+// =============================================================================
 // CONSOLIDATED TOOL 5: search
 // Actions: find, replace, replace_all
 // =============================================================================
