@@ -397,10 +397,12 @@ const pdf = await tools.zetaoffice.save({ action: "export", file_path: "bench/ou
 return { e, odt, pdf };
 ```
 
-`e.chart` reports `{name, range, type}`; `e.preview` reports the sized visual
-area. That is enough to verify the task: no unzip, `pdftoppm` or screenshots.
-The values block becomes `A1:B6` (header row + 5 data rows) and the first
-column becomes the category axis.
+That is the whole task. **The responses are the verification**:
+`e.values = {rows:6, cols:2}`, `e.chart = {name, range:"A1:B6", type:"column"}`,
+`e.preview = {width:~15800, height:~9500}`, and both saves report a byte count.
+Report those and stop — do **not** call `uno` to re-read the sheet, chart type,
+axes or diagram, and do not unzip/render/screenshot anything. The first column
+of the values block is the category axis; the header row is the series name.
 
 For a standalone Calc document (not embedded), use `sheet {action:"chart"}`.
 

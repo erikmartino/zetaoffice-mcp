@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "preamble": "You have the zetaoffice MCP for LibreOffice. Work from the repository root (change into the zetaoffice-mcp checkout first if needed); all paths are relative to it. First call bridge {action:\"status\"} and cookbook. If either tool is missing, reply exactly STALE MCP and stop - do not work around it with shell or other tools. Otherwise: prefer the high-level tools (document, text, sheet, embed, save); use the cookbook's exact recipe when one matches; use uno with describe only when there is no recipe; verify only by reading state back with tool calls (no unzip, pdftoppm or screenshots); report the file paths.",
+  "preamble": "You have the zetaoffice MCP for LibreOffice. Work from the repository root (change into the zetaoffice-mcp checkout first if needed); all paths are relative to it. First call bridge {action:\"status\"} and cookbook. If either tool is missing, reply exactly STALE MCP and stop - do not work around it with shell or other tools. Otherwise: prefer the high-level tools (document, text, sheet, embed, save); use the cookbook's exact recipe when one matches; use uno with describe only when there is no recipe; when a recipe applies, its returned values are the verification - do not add extra reads; never unzip, run pdftoppm or inspect screenshots; report the file paths.",
   "targets": {
     "cookbook": {
       "tool_calls": 8,

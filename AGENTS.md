@@ -61,7 +61,8 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
 - Reset between runs: `node scripts/bench.mjs reset <id>` (cleans output,
   restarts the bridge).
 - Follow the matching cookbook fast path verbatim (for embedded Calc + chart
-  that is the A4 recipe). No filesystem spelunking, no image inspection.
+  that is the A4 recipe). Its responses are the verification; extra `uno` reads
+  to re-check charts/axes are wasted time. No filesystem spelunking, no images.
 - Freeze the toolset: verify the running MCP server has the current tools
   (`cookbook`, `bridge`, `embed`, `uno`) before starting; otherwise the run is
   invalid.
