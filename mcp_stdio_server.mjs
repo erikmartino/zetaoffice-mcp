@@ -14,11 +14,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { patchXlsxFreeze } from "./xlsx_freeze.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const LIBREOFFICE_URL = process.env.LIBREOFFICE_URL || "http://localhost:8765";
+
+// Freeze requests are keyed by sheet name and applied to exported xlsx files.
+// The headless runtime has no attached view, so the filter cannot write panes.
+const freezeSpecs = new Map();
 // Pin tool calls to one Wasm host. Browser tabs reconnect asynchronously and can
 // take over mid-document; "node" keeps a session deterministic (headless work).
 const TARGET = process.env.ZETAOFFICE_TARGET || process.env.LIBREOFFICE_TARGET || "";
@@ -219,8 +224,9 @@ operates on that document; \`document action=create\` throws the current one awa
 - \`sheet {action:"sheet_create"|"sheet_rename"|"sheet_activate"|"validation"|
   "named_range"|"freeze", ...}\` - Calc structure and data rules; \`chart\` accepts
   \`date_axis:true\`.
-- Validation serializes in xlsx; the ODS export does not write it. Freeze is a
-  view feature and may not survive headless Node export; verify.
+- Validation serializes in xlsx; the ODS export does not write it. The headless
+  exporter cannot write frozen panes, so the MCP save layer patches xlsx and
+  reports \`freeze_patched\`.
 
 ## Presentations (Impress)
 
@@ -326,6 +332,21 @@ function persistSaveResult(result, fallbackPath) {
   }
 }
 
+// Persist a save/export and apply any pending frozen-pane metadata to xlsx.
+function persistWithFreeze(result, fallbackPath) {
+  const saved = persistSaveResult(result, fallbackPath);
+  if (saved && saved.success && saved.format === "xlsx" && freezeSpecs.size) {
+    try {
+      const patch = patchXlsxFreeze(saved.file_path, Object.fromEntries(freezeSpecs));
+      saved.freeze_patched = patch.patched;
+      if (patch.missing.length) saved.freeze_missing = patch.missing;
+    } catch (err) {
+      saved.freeze_warning = `Could not patch frozen panes: ${err.message}`;
+    }
+  }
+  return saved;
+}
+
 // =============================================================================
 // CONSOLIDATED TOOL 1: document
 // Actions: create, info, list, content, status, styles,
@@ -378,6 +399,7 @@ Typical flow: document(create) -> text(insert) -> structure(count|paragraph) -> 
   },
   async ({ action, doc_type, style_name, parent_style, font_name, font_size, bold, italic, underline, alignment, slides }) => {
     if (action === "create") {
+      freezeSpecs.clear();
       if (doc_type === "presentation") {
         // Always build a real Impress deck; load_presentation_live only wrote
         // plain text into a Writer document.
@@ -554,12 +576,15 @@ server.tool(
 - read(range, sheet?): 2-D array of values for a range like "A1:B10".
 - write(values, start?, sheet?): write a 2-D array of rows; numbers stay numbers,
   and strings starting with "=" become real formulas.
-- format(range, bold?, italic?, font_size?, align?, fill_color?, sheet?).
+- format(range, bold?, italic?, font_size?, align?, fill_color?, number_format?,
+  sheet?): number_format is currency, percent, date, number, integer, or a
+  custom format code.
 - column_width(column, width_mm, sheet?): widen a column by its letter.
 - chart(data_range, chart_type?, title?, x_title?, y_title?, legend?, sheet?,
-  x?, y?, width?, height?, date_axis?): insert an embedded chart. data_range
-  should include the header row; its first column becomes the category (X)
-  labels. date_axis switches the X axis to a date axis.
+  data_sheet?, x?, y?, width?, height?, date_axis?): insert an embedded chart
+  on \`sheet\` using data from \`data_sheet\` (defaults to the same sheet).
+  data_range should include the header row; its first column becomes the
+  category (X) labels. date_axis switches the X axis to a date axis.
 - sheet_create(name, index?): add a sheet.
 - sheet_rename(name, new_name): rename a sheet.
 - sheet_activate(name): make a sheet active (needed before chart/freeze).
@@ -581,6 +606,8 @@ doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
     font_size: z.number().optional().describe("Font size in points (for 'format')"),
     align: z.enum(["left", "center", "right"]).optional().describe("Horizontal alignment (for 'format')"),
     fill_color: z.string().optional().describe("#RRGGBB cell background (for 'format')"),
+    number_format: z.string().optional().describe("Number format: currency, percent, date, number, integer or a custom code (for 'format')"),
+    data_sheet: z.string().optional().describe("Sheet that owns the chart data (for 'chart'; default same as sheet)"),
     column: z.string().optional().describe("Column letter for 'column_width'"),
     width_mm: z.number().optional().describe("Column width in millimetres (for 'column_width')"),
     data_range: z.string().optional().describe("Data range for 'chart', including the header row"),
@@ -604,9 +631,9 @@ doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
     name: z.string().optional().describe("Sheet or named-range name")
   },
   async ({ action, sheet, range, start, values, bold, italic, font_size, align,
-           fill_color, column, width_mm, data_range, chart_type, title, x_title,
-           y_title, legend, x, y, width, height, date_axis, type, source, show_list,
-           new_name, index, columns, rows, name }) => {
+           fill_color, number_format, data_sheet, column, width_mm, data_range,
+           chart_type, title, x_title, y_title, legend, x, y, width, height,
+           date_axis, type, source, show_list, new_name, index, columns, rows, name }) => {
     if (action === "read") {
       if (!range) return toolError(action, "Missing 'range'.", 'Pass a range like "A1:B10".');
       return jsonResponse(await callLibreoffice("/tools/get_cells_live", "POST", { range, sheet }));
@@ -618,7 +645,7 @@ doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
     } else if (action === "format") {
       if (!range) return toolError(action, "Missing 'range'.", 'Pass a range like "A1:B1".');
       return jsonResponse(await callLibreoffice("/tools/format_range_live", "POST", {
-        range, sheet, bold, italic, font_size, align, fill_color
+        range, sheet, bold, italic, font_size, align, fill_color, number_format
       }));
     } else if (action === "column_width") {
       if (!column) return toolError(action, "Missing 'column'.", "Pass a column letter such as 'A'.");
@@ -629,7 +656,7 @@ doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
       if (!data_range) return toolError(action, "Missing 'data_range'.", 'Pass the range the chart plots, e.g. "A1:B10".');
       return jsonResponse(await callLibreoffice("/tools/add_chart_live", "POST", {
         data_range, chart_type: chart_type || "line", title, x_title, y_title,
-        legend, x, y, width, height, sheet, date_axis
+        legend, x, y, width, height, sheet, data_sheet, date_axis
       }));
     } else if (action === "sheet_create") {
       if (!name) return toolError(action, "Missing 'name'.", "Pass the new sheet name.");
@@ -650,7 +677,13 @@ doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
       if (!name || !range) return toolError(action, "Missing 'name' or 'range'.", "Pass both.");
       return jsonResponse(await callLibreoffice("/tools/calc_named_range_live", "POST", { name, range, sheet }));
     } else if (action === "freeze") {
-      return jsonResponse(await callLibreoffice("/tools/calc_freeze_live", "POST", { sheet, columns, rows }));
+      const result = await callLibreoffice("/tools/calc_freeze_live", "POST", { sheet, columns, rows });
+      if (result && result.success) {
+        const sheetName = result.sheet || sheet;
+        const pane = { columns: Number(result.columns || 0), rows: Number(result.rows || 0) };
+        if (sheetName && (pane.columns || pane.rows)) freezeSpecs.set(sheetName, pane);
+      }
+      return jsonResponse(result);
     }
     return toolError(action, `Invalid action '${action}'.`, "Valid actions: read, write, format, column_width, chart, sheet_create, sheet_rename, sheet_activate, validation, named_range, freeze.");
   }
@@ -989,14 +1022,14 @@ pdf (Impress); ods/xlsx/csv where the document type allows it.`,
       const data = {};
       if (file_path) data.file_path = file_path;
       const result = await callLibreoffice("/tools/save_document_live", "POST", data);
-      return jsonResponse(persistSaveResult(result, file_path));
+      return jsonResponse(persistWithFreeze(result, file_path));
     } else if (action === "export") {
       if (!file_path) return toolError(action, "Missing 'file_path'.", "Pass a path, e.g. report.odt.");
       const result = await callLibreoffice("/tools/export_document_live", "POST", {
         file_path,
         format: export_format
       });
-      return jsonResponse(persistSaveResult(result, file_path));
+      return jsonResponse(persistWithFreeze(result, file_path));
     }
     return toolError(action, `Invalid action '${action}'.`, "Valid actions: save, export.");
   }

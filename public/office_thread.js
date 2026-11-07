@@ -466,13 +466,34 @@ function freezePanes(params) {
   const cols = Number(params.columns || 0);
   const rows = Number(params.rows === undefined ? 1 : params.rows);
   fz.freezeAtPosition(cols, rows);
+  let sheetName = params.sheet ? String(params.sheet) : null;
+  if (!sheetName) {
+    try { sheetName = ctrl.getActiveSheet().getName(); } catch (e) { sheetName = null; }
+  }
   let frozen = null;
   try { frozen = ctrl.getPropertyValue('HasFrozenPanes'); } catch (e) { frozen = null; }
-  const result = { columns: cols, rows, frozen };
+  const result = { sheet: sheetName, columns: cols, rows, frozen };
   if (frozen === null || frozen === undefined) {
-    result.warning = 'No attached view reported frozen panes; the headless Node export may omit the pane. Verify state=\"frozen\" in the xlsx.';
+    result.warning = 'No attached view reported frozen panes; xlsx exported through the MCP server is patched and reports freeze_patched.';
   }
   return result;
+}
+
+function applyNumberFormat(doc, range, requested) {
+  const aliases = {
+    currency: '$#,##0.00',
+    percent: '0.00%',
+    date: 'YYYY-MM-DD',
+    number: '#,##0.00',
+    integer: '0',
+  };
+  const code = aliases[String(requested).toLowerCase()] || String(requested);
+  const locale = new css.lang.Locale({ Language: 'en', Country: 'US' });
+  const formats = doc.getNumberFormats();
+  let key = formats.queryKey(code, locale, true);
+  if (key === -1) key = formats.addNew(code, locale);
+  setUnoProp(range, 'NumberFormat', Module.uno_Type.Long(), key);
+  return { code, key };
 }
 
 function setPageSetup(params) {
@@ -2233,7 +2254,13 @@ zHT.thrPort.onmessage = (event) => {
           setUnoProp(range, 'CellBackColor', Module.uno_Type.Long(),
             parseInt(String(params.fill_color).replace('#', ''), 16));
         }
-        result = { success: true, message: `Formatted ${params.range}` };
+        let numberFormat = null;
+        if (params.number_format) numberFormat = applyNumberFormat(doc, range, params.number_format);
+        result = {
+          success: true,
+          message: `Formatted ${params.range}`,
+          ...(numberFormat ? { number_format: numberFormat.code, number_format_key: numberFormat.key } : {}),
+        };
         break;
       }
 
@@ -2253,6 +2280,7 @@ zHT.thrPort.onmessage = (event) => {
           throw new Error('Active document is not a spreadsheet');
         }
         const sheet = resolveSheet(doc, params.sheet);
+        const dataSheet = params.data_sheet ? resolveSheet(doc, params.data_sheet) : sheet;
         const charts = sheet.getCharts();
         const name = params.name || ('Chart' + (charts.getCount() + 1));
         if (typeof charts.hasByName === 'function' && charts.hasByName(name)) charts.removeByName(name);
@@ -2263,7 +2291,7 @@ zHT.thrPort.onmessage = (event) => {
           Width: Math.round(params.width !== undefined ? params.width : 17000),
           Height: Math.round(params.height !== undefined ? params.height : 9500),
         });
-        const range = sheet.getCellRangeByName(params.data_range || 'A1:B10');
+        const range = dataSheet.getCellRangeByName(params.data_range || 'A1:B10');
         // Some LibreOffice builds expose a fifth aRowHeaders parameter; pass it
         // so the first column (dates) becomes the category axis, and fall back
         // to the 4-argument IDL on builds that do not.
@@ -2334,6 +2362,7 @@ zHT.thrPort.onmessage = (event) => {
           message: `Added ${params.chart_type || 'line'} chart '${name}'`,
           chart: name,
           data_range: params.data_range,
+          data_sheet: params.data_sheet || null,
         };
         break;
       }

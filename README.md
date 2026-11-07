@@ -11,7 +11,7 @@ Built on **ZetaOffice / LOWA** (LibreOffice compiled to WebAssembly), **ZetaJS**
 - **19 MCP tools**: document editing (`document`, `text`, `formula`, `picture`, `table`, `page`, `field`), structure and search (`structure`, `cursor`, `selection`, `search`), spreadsheets (`sheet`, `embed`), review (`track_changes`, `comments`), and utilities (`save`, `bridge`, `cookbook`, `uno`)
 - **Native LibreOffice Math** (`formula`): real, editable Math objects (StarMath syntax), not text approximations
 - **Pictures** (`picture`): embed png/jpg/gif/bmp files as real inline graphics
-- **High-level capability layer**: Writer tables with totals, page setup/headers/footers, bookmarks/links/caption pairs, Calc sheets/validation/named ranges/freeze/date axes — one call each
+- **High-level capability layer**: Writer tables with totals, page setup/headers/footers, bookmarks/links/caption pairs, Calc sheets/validation/named ranges/number formats/freeze/date axes/cross-sheet charts — one call each
 - **Headless by default**: the WASM engine runs inside Node (`server.mjs --node`); no browser or Chrome process
 - **Real exports**: ODT, DOCX and PDF produced by LibreOffice's own filters
 - **One active document**, driven over MCP stdio or plain HTTP/WebSocket

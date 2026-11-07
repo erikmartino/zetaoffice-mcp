@@ -24,3 +24,4 @@ jobs:
           node --check lowa/node-host.mjs
           node --check lowa/prepare-cdn.mjs
           node --check test_client.mjs
+          node --check xlsx_freeze.mjs

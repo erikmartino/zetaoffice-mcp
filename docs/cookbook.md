@@ -96,22 +96,27 @@ sheet    {action:"write", sheet:"Inputs", values:[["Rate"],[0.05],[0.075]]}
 sheet    {action:"named_range", name:"RateList", sheet:"Inputs", range:"A1:A3"}
 sheet    {action:"validation", sheet:"Inputs", range:"B2:B10", type:"list",
           source:"$Inputs.$A$1:$A$3"}
-sheet    {action:"chart", sheet:"Inputs", data_range:"A1:B7", chart_type:"line",
-          date_axis:true}
+sheet    {action:"format", sheet:"Inputs", range:"B1:B10", number_format:"percent"}
+sheet    {action:"chart", sheet:"Summary", data_sheet:"Monthly",
+          data_range:"A1:B7", chart_type:"line", date_axis:true}
 sheet    {action:"freeze", sheet:"Inputs", rows:1}
 ```
 
 - The first `sheet_create` reuses the default `Sheet1` as the named sheet, so a
   three-sheet workbook stays at three sheets.
 - `chart date_axis` changes the X axis to a real date axis (serializes as
-  `dateAx` in xlsx).
+  `dateAx` in xlsx). `data_sheet` puts the chart on one sheet while its data
+  lives on another (e.g. a chart on Summary from Monthly).
+- `format number_format` accepts `currency`, `percent`, `date`, `number`,
+  `integer` or a custom code such as `#,##0.00`. It is independent of bold/
+  fill/alignment, so one call can do both.
 - `validation` writes real dropdown/list validation. **The xlsx filter
   serializes it; the ODS filter in this build does not** — export xlsx when
   validation matters.
-- Freeze is a controller/view feature. In the headless Node runtime there may
-  be no attached view, so `freeze` can report success while the exported xlsx
-  has no pane. Verify `state="frozen"` in the xlsx; if absent, report the
-  headless limitation rather than retrying.
+- Freeze is a controller/view feature. The headless Node runtime has no
+  attached view, so the LibreOffice filter cannot write panes; the MCP save
+  layer patches the exported xlsx and reports `freeze_patched`. This applies to
+  `save`/`export` through the MCP server (not direct HTTP exports).
 
 ---
 
@@ -374,12 +379,14 @@ columns and link targets.
 For a standard embedded Calc chart use:
 
 ```
-sheet {action:"chart", sheet:"Monthly", data_range:"A1:B7",
-       chart_type:"line", title:"Monthly", date_axis:true}
+sheet {action:"chart", sheet:"Summary", data_sheet:"Monthly",
+       data_range:"A1:B7", chart_type:"line", title:"Monthly",
+       date_axis:true}
 ```
 
-`date_axis:true` makes the X axis a real date axis. The UNO form below is the
-fallback for chart types or properties the tool does not expose:
+`date_axis:true` makes the X axis a real date axis; `data_sheet` keeps the chart
+on the target sheet while plotting another sheet's range. The UNO form below is
+the fallback for chart types or properties the tool does not expose:
 
 Charts are document objects owned by a sheet (Calc) or by the document:
 
@@ -577,6 +584,7 @@ await tools.zetaoffice.sheet({ action: "write", values: [
   ["x", 1, 10], ["y", 2, 20], ["z", 3, 30],
 ] });
 await tools.zetaoffice.sheet({ action: "format", range: "A1:C1", bold: true });
+await tools.zetaoffice.sheet({ action: "format", range: "C2:C7", number_format: "currency" });
 await tools.zetaoffice.sheet({ action: "column_width", column: "A", width_mm: 40 });
 await tools.zetaoffice.sheet({ action: "column_width", column: "B", width_mm: 25 });
 
@@ -953,9 +961,9 @@ data-validation.
 
 **Freeze panes:** use `sheet {action:"freeze", sheet:"Summary", rows:1}`.
 The mechanism is `setActiveSheet` then the controller's `XViewFreezable`
-`freezeAtPosition(cols, rows)`. Freezing needs an attached view; in the headless
-Node worker it can be a no-op at export. Verify a pane in the xlsx before
-claiming it.
+`freezeAtPosition(cols, rows)`. The headless exporter cannot serialize the pane;
+the MCP save layer patches the xlsx and reports `freeze_patched`. For a direct
+HTTP export, verify `state="frozen"` in the sheet XML.
 
 **Multi-sheet formulas** use `Sheet.Cell` notation in this build:
 `=SUM(Monthly.B2:B7)` / `=AVERAGE(Monthly.B2:B7)`; export normalizes them.
@@ -1078,7 +1086,7 @@ Common dead ends and their fix:
 | Conditional format vanishes on export | `range.ConditionalFormat.addNew()` accepts the entry but it is not attached to the sheet model in this build; the ODS/XLSX writers emit nothing | known engine gap (B3): report it instead of retrying; `XConditionalFormats.createByRange` needs an `XSheetCellRanges` that is not reachable here |
 | `set` on an enum property leaves it at 0 | the enum type name is not registered in this build, so a typed Any cannot be built by name | use `uno {op:"set_enum", h, name, value:<number>}`: it takes the Type from the runtime property descriptor |
 | Validation exists but is absent from an ODS | the ODS filter does not serialize data-validation in this build | export xlsx; verify `<dataValidation ... type="list">` |
-| Freeze reports success but xlsx has no pane | the headless Node runtime has no attached view for `XViewFreezable` | verify `state="frozen"`; if absent, report the headless limitation instead of retrying |
+| Freeze reports a view warning but xlsx has no pane | direct HTTP/worker export bypasses the MCP post-pass | save/export through the MCP server; it patches xlsx and reports `freeze_patched` |
 | `Any` rejects a ZetaJS proxy with `uno_Reference_...` | proxies wrap the embind object; `Any` needs the target | unwrap with the `getProxyTarget` symbol (the `setValidation` helper shows the pattern) |
 
 ---
