@@ -7,7 +7,7 @@ real sockets (proxied to the host over WebSocket by
 inside wasm:
 
 ```
-native UNO client (pyuno/Java/C++/…)
+native UNO client (Java/C++/…)
   │  TCP  uno:socket,host=localhost,port=N;urp;StarOffice.ComponentContext
   ▼
 websocket_to_posix_proxy (host process)  ⇄  WebSocket  ⇄  wasm POSIX sockets
@@ -21,7 +21,7 @@ connection** and drive it from JS with opaque bytes. This avoids the unmerged
 Emscripten socket fixes and never opens a socket inside wasm.
 
 ```
-pyuno / any UNO client
+any UNO client
   │  TCP  uno:socket,host=localhost,port=2002;urp;StarOffice.ComponentContext
   ▼
 Node bridge (server.mjs, UNO_TCP_PORT=2002)      ← the real "UNO socket"

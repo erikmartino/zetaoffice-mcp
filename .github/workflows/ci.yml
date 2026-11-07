@@ -23,11 +23,4 @@ jobs:
           node --check lowa/node-runtime.mjs
           node --check lowa/node-host.mjs
           node --check lowa/prepare-cdn.mjs
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Check Python syntax
-        run: |
-          python -m py_compile test_client.py python/uno.py python/unohelper.py
+          node --check test_client.mjs

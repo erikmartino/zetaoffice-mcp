@@ -10,7 +10,8 @@
     "start:browser": "node server.mjs --browser",
     "mcp": "node mcp_stdio_server.mjs",
     "mcp:browser": "HEADLESS=false node mcp_stdio_server.mjs",
-    "start:node": "node server.mjs --node"
+    "start:node": "node server.mjs --node",
+    "test": "node test_client.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",

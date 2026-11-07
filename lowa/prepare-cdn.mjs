@@ -15,7 +15,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CDN = path.join(here, 'cdn');
@@ -25,12 +26,21 @@ const force = process.argv.includes('--force');
 
 fs.mkdirSync(CDN, { recursive: true });
 
-for (const f of FILES) {
+async function download(f) {
   const dest = path.join(CDN, f);
-  if (!force && fs.existsSync(dest)) continue;
+  if (!force && fs.existsSync(dest)) return;
+  const url = `${BASE}/${f}`;
   console.log(`[cdn] downloading ${f}`);
-  execFileSync('curl', ['-sS', '--compressed', '-o', dest, `${BASE}/${f}`], { stdio: 'inherit' });
+  const res = await fetch(url, { redirect: 'follow' });
+  if (!res.ok || !res.body) {
+    throw new Error(`[cdn] ${url} -> HTTP ${res.status}`);
+  }
+  const tmp = `${dest}.part`;
+  await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(tmp));
+  fs.renameSync(tmp, dest);
 }
+
+for (const f of FILES) await download(f);
 
 // soffice.js contains Emscripten glue written as CommonJS.
 const pkg = path.join(CDN, 'package.json');

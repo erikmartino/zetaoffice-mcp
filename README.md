@@ -24,7 +24,7 @@ flowchart LR
     subgraph Client ["AI Assistant / MCP Layer"]
         A[Claude Code / Antigravity / Cursor] -->|MCP Stdio| B[mcp_stdio_server.mjs]
         B -->|HTTP POST :8765| C[Node.js Bridge Server]
-        T[test_client.py / curl] -->|HTTP POST :8765| C
+        T[test_client.mjs / fetch] -->|HTTP POST :8765| C
     end
 
     subgraph WasmHost ["WebAssembly Host (Zero-Install)"]
@@ -95,7 +95,7 @@ LibreOffice may lose complex layout such as n-ary limits.
 
 ## 🚀 Quick Start
 
-Requirements: **Node.js 20+**, **pnpm**, and ~250 MB of disk for the ZetaOffice WASM bundle.
+Requirements: **Node.js 20+** and **pnpm** (plus ~250 MB of disk for the ZetaOffice WASM bundle). No Python, no browser and no LibreOffice installation are needed.
 
 ```bash
 git clone https://github.com/erikmartino/zetaoffice-mcp.git
@@ -209,30 +209,15 @@ Even if started in headless mode, you can control the browser directly from your
 
 ## 🧪 Testing the Bridge
 
-### Run the Automated Python Test Client
-With the server running (either headless or browser mode):
+Start the bridge, then run the Node smoke test:
+
 ```bash
-python3 test_client.py
+node test_client.mjs
 ```
-This exercises the main tool categories:
-* `document` (info, styles, content)
-* `text` (insert & format via UNO)
-* `structure` (paragraph AST inspection)
-* `search` (in-memory find & replace)
 
-### Test via `curl`
-```bash
-# Health check & mode
-curl http://localhost:8765/health
-
-# Open desktop browser on demand
-curl -X POST http://localhost:8765/tools/open_browser_live
-
-# Insert text via UNO
-curl -X POST http://localhost:8765/tools/insert_text_live \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Hello from curl via ZetaJS UNO!\n"}'
-```
+It creates a document, inserts text and a native Math formula, lists the
+formulas and exits non-zero on failure. Point it elsewhere with
+`LIBREOFFICE_URL=http://host:port node test_client.mjs`.
 
 ---
 
@@ -265,18 +250,3 @@ boldAny.delete();
 ```
 
 ---
-
-## 🐍 PyUNO over WebSocket (Python drives the Wasm backend)
-
-`python/` provides a drop-in **`import uno`** shim so existing PyUNO scripts run
-against LibreOffice Wasm instead of a native LibreOffice. The bridge is a *dumb*
-UNO-over-WebSocket pass-through (`root/get/set/call/query/release`); ZetaJS/LOWA
-executes the real UNO operations.
-
-- External UNO clients connect to **`ws://localhost:8765/uno`**.
-- The Node broker relays each request to the browser host (`index.html`) →
-  worker (`office_thread.js`), exactly like the MCP tool path.
-- File I/O is handled on the main thread against the Wasm virtual filesystem
-  (`zHM.FS`); `uno.systemPathToFileUrl()` round-trips host files.
-
-See [`python/README.md`](python/README.md) for the full API and examples.

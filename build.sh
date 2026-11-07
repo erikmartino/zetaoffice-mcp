@@ -1,5 +1,5 @@
 #!/bin/bash
-# ZetaJS WebAssembly MCP Bridge Build & Setup Script
+# ZetaOffice MCP Build & Setup Script
 # Zero-installation: No LibreOffice desktop installation or .oxt package required!
 
 set -e
@@ -28,7 +28,7 @@ else
 fi
 
 # 3. Ensure scripts are executable
-chmod +x server.mjs mcp_stdio_server.mjs test_client.py
+chmod +x server.mjs mcp_stdio_server.mjs test_client.mjs
 
 # 4. Verify runtime assets
 if [ ! -f "public/zetajs/zeta.js" ] || [ ! -f "public/office_thread.js" ]; then
@@ -43,4 +43,4 @@ echo "🚀 To run the bridge:"
 echo "   1. Start the bridge daemon:  node server.mjs (or pnpm start)"
 echo "   2. Open browser canvas:       http://localhost:8765"
 echo "   3. Connect MCP client:       node mcp_stdio_server.mjs"
-echo "   4. Or run test client:       python3 test_client.py"
+echo "   4. Or run smoke test:        node test_client.mjs"

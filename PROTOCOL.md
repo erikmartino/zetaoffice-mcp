@@ -9,7 +9,7 @@ the Wasm worker.
 - **Objects:** opaque integer handles, assigned by the server. `0` means null.
 - **No callbacks** (listeners) in v1.
 
-Anything that can open a WebSocket and encode JSON can use this — Python, Node,
+Anything that can open a WebSocket and encode JSON can use this — Node,
 Go, a browser, an LLM agent emitting tool calls, `websocat`, etc.
 
 ## Request / response
@@ -85,14 +85,10 @@ callable); otherwise it returns the decoded value.
 
 `storeToURL`/`loadComponentFromURL` use paths inside the Wasm virtual
 filesystem. Write bytes in with `writeFile`, read results out with `readFile`
-(base64). A small host<->Wasm path mapping helper lives in the Python client,
-but the protocol itself is just `readFile`/`writeFile`.
+(base64). The protocol itself is just `readFile`/`writeFile`; path mapping is
+left to the client.
 
 ## Clients
 
 - **Any language:** implement the ops above directly.
-- **Python (generic):** `uno_ws.Bridge` (`python/uno_ws/`) —
-  `op_get`, `op_set`, `op_call`, `op_query`, `read_file`, `write_file`.
-- **Python (PyUNO source-compat, optional):** `import uno` via
-  `python/uno.py`, for existing `uno` scripts.
 - **MCP clients:** the same worker is reachable via `mcp_stdio_server.mjs`.

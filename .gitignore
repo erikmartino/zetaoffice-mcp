@@ -1,10 +1,6 @@
 node_modules/
 lowa/cdn/
 
-# Python
-__pycache__/
-*.py[cod]
-
 # Local output and logs
 *.log
 mcp-libre-output/
