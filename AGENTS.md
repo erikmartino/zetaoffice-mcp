@@ -40,8 +40,9 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
 9. **Stale browser tabs lie.** The bridge prefers the newest ready browser tab;
    an old tab can answer with "not implemented". Restart the bridge, open a
    fresh tab, or target `?target=node` for headless work.
-10. **One client, one document.** Keep the handle returned by `create`/`load`;
-    `getCurrentComponent()` may be a different open document.
+10. **One client, one document.** `document {action:"create"}` returns
+    `handle: {$h}` — use it for UNO. `getCurrentComponent()` may be a different
+    open document, and the root → Desktop crawl wastes calls.
 11. **Paths belong to the checkout.** `save`/`picture` resolve relative paths
     against the repo root; prefer absolute paths. Never search `/` for output.
 12. **Pin headless runs to the node runtime.** Set `LIBREOFFICE_TARGET=node`

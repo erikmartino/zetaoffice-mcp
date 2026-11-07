@@ -1738,7 +1738,12 @@ zHT.thrPort.onmessage = (event) => {
           resetTypingAttributes(cur);
           xModel = cur;
           currentDocTitle = `Untitled ${type.charAt(0).toUpperCase() + type.slice(1)}`;
-          result = { success: true, message: `Cleared and reset active ${type} document canvas via ZetaJS UNO`, doc_type: type };
+          result = {
+            success: true,
+            message: `Cleared and reset active ${type} document canvas via ZetaJS UNO`,
+            doc_type: type,
+            handle: { $h: unoPut(cur) },
+          };
           break;
         }
 
@@ -1746,7 +1751,12 @@ zHT.thrPort.onmessage = (event) => {
         currentDocType = type;
         currentDocTitle = `Untitled ${type.charAt(0).toUpperCase() + type.slice(1)}`;
         resetTypingAttributes(xModel);
-        result = { success: true, message: `Created new ${type} document via ZetaJS UNO`, doc_type: type };
+        result = {
+          success: true,
+          message: `Created new ${type} document via ZetaJS UNO`,
+          doc_type: type,
+          handle: { $h: unoPut(xModel) },
+        };
         break;
       }
 

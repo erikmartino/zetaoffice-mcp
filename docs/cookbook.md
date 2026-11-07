@@ -406,6 +406,55 @@ of the values block is the category axis; the header row is the series name.
 
 For a standalone Calc document (not embedded), use `sheet {action:"chart"}`.
 
+### Writer table with a sum formula (B1 fast path)
+
+`document {action:"create"}` returns `handle: {$h}`. Use it directly for UNO;
+do not crawl root → ServiceManager → Desktop → getCurrentComponent.
+
+```js
+const U = (o) => tools.zetaoffice.uno(o);
+const doc = await tools.zetaoffice.document({ action: "create", doc_type: "writer" });
+const h = doc.handle.$h;
+const text = (await U({ op: "call", h, name: "getText" })).value.$h;
+const cur = (await U({ op: "call", h: text, name: "createTextCursor" })).value.$h;
+await U({ op: "call", h: cur, name: "gotoEnd", args: [false] });
+await U({ op: "call", h: cur, name: "collapseToEnd" });
+
+const table = (await U({ op: "call", h, name: "createInstance",
+  args: ["com.sun.star.text.TextTable"] })).value.$h;
+await U({ op: "call", h: table, name: "initialize", args: [6, 3] });
+await U({ op: "call", h: text, name: "insertTextContent",
+  args: [{ $h: cur }, { $h: table }, false] });
+
+const cell = async (n) => (await U({ op: "call", h: table, name: "getCellByName", args: [n] })).value.$h;
+const put = async (n, v) => {
+  const c = await cell(n);
+  if (typeof v === "number") await U({ op: "call", h: c, name: "setValue", args: [v] });
+  else await U({ op: "call", h: c, name: "setString", args: [v] });
+};
+
+await put("A1", "Item"); await put("B1", "Qty"); await put("C1", "Price");
+await put("A2", "Widget A"); await put("B2", 4);  await put("C2", 12.5);
+await put("A3", "Widget B"); await put("B3", 2);  await put("C3", 7.25);
+await put("A4", "Widget C"); await put("B4", 10); await put("C4", 3.99);
+await put("A5", "Widget D"); await put("B5", 1);  await put("C5", 45);
+await put("A6", "Total");
+
+const total = await cell("C6");
+await U({ op: "call", h: total, name: "setFormula", args: ["sum<C2:C5>"] });
+const value = (await U({ op: "call", h: total, name: "getValue" })).value;
+const tables = (await U({ op: "call", h, name: "getTextTables" })).value.$h;
+const count = (await U({ op: "call", h: tables, name: "getCount" })).value;
+
+await tools.zetaoffice.save({ action: "export",
+  file_path: "bench/out/B1/table.odt", export_format: "odt" });
+return { count, value };
+```
+
+Six rows = header + 4 data rows + total. The total formula syntax is `sum<C2:C5>`
+(accepted as a real Writer formula, `ooow:sum` in the ODT). The save response
+and `count`/`value` are the verification; do not re-read cells afterwards.
+
 ### Math formula
 
 ```

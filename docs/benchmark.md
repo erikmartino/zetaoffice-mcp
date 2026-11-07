@@ -134,7 +134,7 @@ A run is only valid if the environment and the grading are fixed.
 
 | ID | Prompt | Acceptance checks |
 | --- | --- | --- |
-| B1 | Create a Writer document with a 5×3 table (`Item`, `Qty`, `Price`), fill 4 rows, and a total row whose Price cell sums the column. Export ODT. | native table (not embedded); 5 rows; formula evaluates to the correct total |
+| B1 | Create `bench/out/B1/table.odt`: a 3-column table (`Item`, `Qty`, `Price`), header row, 4 data rows, and a total row whose Price cell sums the column. Export ODT. | native table (not embedded); total formula (`ooow:sum`) present |
 | B2 | Create a Writer document with A4 landscape, 1.5 cm margins, a "Confidential" header and a footer with page numbers. Export PDF. | page setup reflects the values; PDF contains header and page number |
 | B3 | Create a Calc sheet titled "Budget" (merged A1:C1), amounts in C formatted as currency, and a conditional format that highlights Qty > 10. | merge exists; currency number format; one conditional rule |
 | B4 | Add a bookmark named `intro` to paragraph 2 and a hyperlink from paragraph 1 that jumps to it, plus an external `https://` link. | bookmark exists; internal link targets `#intro`; external URL present |
