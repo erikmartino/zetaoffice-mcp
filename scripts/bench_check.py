@@ -97,8 +97,16 @@ def check_a3(d):
 
 
 def check_a4(d):
-    pdf = first(d, ".pdf")
-    return [("pdf exists", bool(pdf) and size_ok(pdf, 5000), pdf)]
+    odt, pdf = first(d, ".odt"), first(d, ".pdf")
+    names = zip_names(odt) if odt else []
+    obj = zip_text(odt, "Object 1/content.xml") if odt else ""
+    return [
+        ("odt exists", bool(odt), odt),
+        ("embedded sheet", any(n.startswith("Object 1/") for n in names), ""),
+        ("6 rows", len(re.findall(r"<table:table-row", obj)) >= 6, str(len(re.findall(r"<table:table-row", obj)))),
+        ("chart", any("Chart" in n for n in names), ""),
+        ("pdf exists", bool(pdf) and size_ok(pdf, 5000), pdf),
+    ]
 
 
 def check_a5(d):
@@ -125,8 +133,8 @@ def check_a6(d):
 
 
 def check_a8(d):
-    docx, pdf = first(d, ".docx"), first(d, ".pdf")
-    return [("docx exists", bool(docx), docx), ("pdf exists", bool(pdf), pdf)]
+    odt, docx, pdf = first(d, ".odt"), first(d, ".docx"), first(d, ".pdf")
+    return [("odt exists", bool(odt), odt), ("docx exists", bool(docx), docx), ("pdf exists", bool(pdf), pdf)]
 
 
 def check_a9(_d):

@@ -149,6 +149,31 @@ function getNodeRuntimeClient() {
   return null;
 }
 
+// One Wasm instance per session. Switching instances mid-document makes handles
+// and documents diverge (a model created on one worker means nothing on the
+// other), so pick once and stick to it until it disconnects.
+let sessionClient = null;
+
+async function pickSessionClient() {
+  if (sessionClient && sessionClient.readyState === 1) return sessionClient;
+  const browser = getReadyBrowserClient();
+  if (browser) {
+    try {
+      // current workers understand uno_live; older cached pages do not
+      const probe = await requestOnClient(browser, 'uno_live', { op: 'root' }, 4000);
+      if (probe && probe.success) {
+        sessionClient = browser;
+        return browser;
+      }
+      console.log('[MCP] Browser tab runs older worker code; using the node runtime for this session');
+    } catch (e) {
+      console.log('[MCP] Browser tab probe failed; using the node runtime');
+    }
+  }
+  sessionClient = getNodeRuntimeClient() || getActiveClient();
+  return sessionClient;
+}
+
 // Send one MCP tool call to one specific Wasm host and await its reply.
 function requestOnClient(target, tool, params, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
@@ -571,7 +596,7 @@ const server = http.createServer(async (req, res) => {
       const target = (parsedUrl.searchParams.get('target') || '').toLowerCase();
       const client = target === 'node' ? getNodeRuntimeClient()
         : target === 'browser' ? getReadyBrowserClient()
-        : getActiveClient();
+        : await pickSessionClient();
       if (!client) {
         res.writeHead(503, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
@@ -604,7 +629,22 @@ const server = http.createServer(async (req, res) => {
       }));
 
       try {
-        const result = await promise;
+        let result = await promise;
+        // A stale browser tab can answer "not implemented" for tools the
+        // current worker has. Retry that call on the headless Node runtime
+        // instead of failing the operation.
+        if (result && result.success === false && /not implemented/i.test(result.error || '')) {
+          const node = getNodeRuntimeClient();
+          if (node && node !== client) {
+            console.log(`[MCP] ${toolName}: active client lacks the tool; retrying on the node runtime`);
+            try {
+              result = await requestOnClient(node, toolName, params, 30000);
+              if (result && result.success !== false) sessionClient = node;
+            } catch (e) {
+              console.log(`[MCP] ${toolName}: node retry failed: ${e.message}`);
+            }
+          }
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
       } catch (err) {
@@ -701,11 +741,29 @@ wss.on('connection', (ws, req) => {
         console.log(`[ZetaJS] ZetaOffice UNO Engine ready in browser: ${data.info || 'OK'}`);
       } else if (data.type === 'office_ready') {
         ws.__isBrowser = true;
-        ws.__officeReady = true;
-        console.log(`[ZetaJS] Browser Wasm worker ready: ${data.info || 'OK'}${data.reconnect ? ' (reconnect)' : ''}`);
-        // Only push the canonical document into freshly booted tabs: a tab that
-        // merely reconnected already holds its own (possibly edited) document.
-        if (!data.reconnect) syncDocumentToBrowser(ws);
+        if (data.reconnect) {
+          // A reconnecting page keeps whatever worker code it loaded. Probe it:
+          // if it predates uno_live (or the current bridge), reload it once so
+          // the session cannot route to a stale worker.
+          ws.__officeReady = false;
+          requestOnClient(ws, 'uno_live', { op: 'root' }, 4000)
+            .then((result) => {
+              if (result && result.success) {
+                ws.__officeReady = true;
+                console.log('[ZetaJS] Reconnected tab has current worker code');
+              } else {
+                try { ws.send(JSON.stringify({ type: 'reload' })); } catch (e) { /* ignore */ }
+              }
+            })
+            .catch(() => {
+              try { ws.send(JSON.stringify({ type: 'reload' })); } catch (e) { /* ignore */ }
+            });
+        } else {
+          ws.__officeReady = true;
+          console.log(`[ZetaJS] Browser Wasm worker ready: ${data.info || 'OK'}`);
+          // Only push the canonical document into freshly booted tabs.
+          syncDocumentToBrowser(ws);
+        }
       } else if (data.type === 'mcp_response') {
         const pending = pendingRequests.get(data.id);
         if (pending && !pending.responded) {
@@ -739,6 +797,7 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     console.log('[WebSocket] Browser tab disconnected');
     connectedClients.delete(ws);
+    if (sessionClient === ws) sessionClient = null;
   });
 });
 

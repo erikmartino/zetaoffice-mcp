@@ -892,8 +892,8 @@ bytes}. Supported formats: odt, docx, pdf, html, txt (Writer); odp, pptx, ppt,
 pdf (Impress); ods/xlsx/csv where the document type allows it.`,
   {
     action: z.enum(["save", "export"]).describe("Operation to perform"),
-    file_path: z.string().optional().describe("Absolute output path, e.g. /home/me/out.odt (required for 'export')"),
-    export_format: z.enum(["pdf", "docx", "odt", "html", "txt", "odp", "pptx", "ppt"]).default("pdf").describe("Output format (for 'export')")
+    file_path: z.string().optional().describe("Output path, e.g. out.odt (required for 'export')"),
+    export_format: z.enum(["pdf", "docx", "odt", "html", "txt", "odp", "pptx", "ppt", "xlsx", "ods", "csv"]).default("pdf").describe("Output format (for 'export')")
   },
   async ({ action, file_path, export_format }) => {
     if (action === "save") {
@@ -902,7 +902,7 @@ pdf (Impress); ods/xlsx/csv where the document type allows it.`,
       const result = await callLibreoffice("/tools/save_document_live", "POST", data);
       return jsonResponse(persistSaveResult(result, file_path));
     } else if (action === "export") {
-      if (!file_path) return toolError(action, "Missing 'file_path'.", "Pass an absolute path, e.g. /home/me/report.odt.");
+      if (!file_path) return toolError(action, "Missing 'file_path'.", "Pass a path, e.g. report.odt.");
       const result = await callLibreoffice("/tools/export_document_live", "POST", {
         file_path,
         format: export_format
@@ -1047,7 +1047,7 @@ The image bytes are embedded in the document on export; use
 save(export, export_format:"odt"|"docx"|"pdf").`,
   {
     action: z.enum(["insert"]).describe("Operation to perform"),
-    file_path: z.string().optional().describe("Absolute path to a local image (png/jpg/gif/bmp) for 'insert'"),
+    file_path: z.string().optional().describe("Local image path (png/jpg/gif/bmp) for 'insert'"),
     width_cm: z.number().optional().describe("Display width in centimetres (default 5)"),
     height_cm: z.number().optional().describe("Display height in centimetres (default 5)"),
     display: z.boolean().default(true).describe("Put the picture on its own paragraph"),
@@ -1055,12 +1055,12 @@ save(export, export_format:"odt"|"docx"|"pdf").`,
   },
   async ({ action, file_path, width_cm, height_cm, display, align }) => {
     if (action !== "insert") return toolError(action, `Invalid action '${action}'.`, "Valid actions: insert.");
-    if (!file_path) return toolError(action, "Missing 'file_path'.", "Pass an absolute path, e.g. /home/me/maxwell.jpg.");
+    if (!file_path) return toolError(action, "Missing 'file_path'.", "Pass a path, e.g. picture.png.");
     let bytes;
     try {
       bytes = fs.readFileSync(file_path);
     } catch (err) {
-      return toolError(action, `Cannot read '${file_path}': ${err.message}`, "Pass an absolute path to a png/jpg/gif/bmp file.");
+      return toolError(action, `Cannot read '${file_path}': ${err.message}`, "Pass a local png/jpg/gif/bmp path.");
     }
     const ext = (path.extname(file_path).replace(/^\./, '') || 'png').toLowerCase();
     const data = { image_base64: bytes.toString('base64'), image_type: ext, display };

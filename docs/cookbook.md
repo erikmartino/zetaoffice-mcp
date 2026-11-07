@@ -94,6 +94,13 @@ Do this instead of guessing names or argument counts:
 If a property is not in `properties`, it may be an accessor: try
 `call h "getX"` (e.g. `getAxisTitle`, `getEmbeddedObject`).
 
+Every `uno` result is `{success, op, value}`. An interface handle is
+`value.$h`; a sequence is `value` (array). Do not read `$h` at the top level.
+
+Handles belong to one Wasm worker and are renumbered after a bridge restart.
+The bridge pins a session to one worker; if a call still finds a handle
+invalid, re-acquire it from `root` — never reuse an old number.
+
 ---
 
 ## 4. The mutation pattern
@@ -280,6 +287,18 @@ model.getSheets() / getText() / getDrawPages()   # same object tree as a top-lev
 Fill it with the same calls you would use on a standalone document. Save the
 container; the nested model is stored with it.
 
+To size the OLE preview (otherwise a large object can cache a clipped one):
+
+```
+obj      = container.getByName("Object1")
+supplier = query obj "com.sun.star.embed.XEmbeddedObjectSupplier2"
+ctl      = call supplier "getExtendedControlOverEmbeddedObject"
+visual   = query ctl "com.sun.star.embed.XVisualObject"
+call visual "setVisualAreaSize"
+     [{"$e":"com.sun.star.embed.Aspect","v":"ASPECT_CONTENT"},
+      {"$s":"com.sun.star.awt.Size","Width":16000,"Height":12000}]
+```
+
 ### R8 — Export with options
 
 `storeToURL(url, props)` where props are `PropertyValue` structs. `FilterName`
@@ -389,8 +408,9 @@ Work through this in order; each step removes a class of guessing.
    controller: `getText()`, `getSheets()`, `getDrawPages()`,
    `getCurrentController()`, `getStyleFamilies()`, `getTextSections()`.
 4. **Find the factory.** Create children with `doc.createInstance(service)`.
-   If that returns null, try the document's `ServiceManager`
-   (`createInstanceWithContext`) or check the service name in the IDL docs.
+   Document content (tables, fields, embedded objects, shapes) must go through
+   the document factory; `ServiceManager.createInstanceWithContext` returns null
+   for many of these in the Wasm build.
 5. **Attach it.** Text content → `insertTextContent`; shape → `page.add`;
    cell data → `setDataArray`; chart → `addNewByName`; style → mutate the style.
 6. **Configure it.** `describe` the live object for properties; if a property is
@@ -408,7 +428,9 @@ Common dead ends and their fix:
 | A method "does not exist" | wrong interface/accessor | `describe h`; look for `getX` |
 | `UnknownPropertyException` | property belongs to a sub-object | `getX()` then describe that object |
 | Call succeeds, nothing changes | void no-op (bad CLSID, stale cursor, wrong target) | verify; check `getElementNames()` / counts |
-| Wrong document edited | several docs open | keep the handle from create/load; don't rely on `getCurrentComponent` |
+| Wrong document edited | several docs open or two Wasm workers | keep the handle from create/load; the bridge pins one worker per session |
+| Handle suddenly invalid | bridge restarted or worker reloaded | re-acquire from `root`; handles are per worker |
+| `uno` result looks empty | reading `$h` at top level | use `value.$h` (envelope is `{success, op, value}`) |
 | Argument count mismatch | build-specific signature | `describe` the method; follow the reported count |
 | Preview looks wrong | cached OLE preview | size at creation; not a data problem |
 

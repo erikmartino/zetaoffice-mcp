@@ -50,11 +50,12 @@
     {
       "id": "A4",
       "group": "cookbook",
-      "prompt": "Fill the embedded sheet in the open document with 6 rows and add a column chart; export report.pdf.",
+      "prompt": "Create bench/out/A4/report.odt with an embedded Calc sheet, fill it with 6 rows (header + 5 data rows), add a column chart, and export report.pdf beside it. Save the ODT too.",
       "output_dir": "bench/out/A4",
       "checks": [
-        "embedded sheet has 6 rows",
-        "chart count 1",
+        "ODT has an embedded sheet",
+        "6 rows in the embedded sheet",
+        "chart in the embedded object",
         "PDF exists"
       ]
     },
@@ -93,11 +94,13 @@
     {
       "id": "A8",
       "group": "cookbook",
-      "prompt": "Export the current document as DOCX and PDF and open it in the browser.",
+      "prompt": "Create bench/out/A8/note.odt with a heading and a paragraph, export it as DOCX and PDF, and open it in the browser.",
       "output_dir": "bench/out/A8",
       "checks": [
-        "both files exist",
-        "browser tab shows the document"
+        "ODT exists",
+        "DOCX exists",
+        "PDF exists",
+        "browser tab shows it"
       ]
     },
     {

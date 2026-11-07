@@ -293,7 +293,7 @@ function listEmbeddedFormulas(doc) {
   const container = getEmbeddedObjectContainer(d);
   if (!container) return [];
   let names = [];
-  try { names = Array.from(container.getElementNames() || []); } catch (e) { return []; }
+  try { names = toArray(container.getElementNames()); } catch (e) { return []; }
   // Object1, Object2, ... Object10: compare numerically for stable indices.
   names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
@@ -618,6 +618,21 @@ function a1ToPos(a1) {
   const letters = m[1].toUpperCase();
   for (let i = 0; i < letters.length; i++) col = col * 26 + (letters.charCodeAt(i) - 64);
   return { col: col - 1, row: parseInt(m[2], 10) - 1 };
+}
+
+// ZetaJS returns UNO sequences as either arrays or size()/get() proxies.
+function toArray(seq) {
+  if (!seq) return [];
+  if (Array.isArray(seq)) return seq;
+  try {
+    if (typeof seq.size === 'function' && typeof seq.get === 'function') {
+      const out = [];
+      const n = seq.size();
+      for (let i = 0; i < n; i++) out.push(seq.get(i));
+      return out;
+    }
+  } catch (e) { /* fall through */ }
+  try { return Array.from(seq); } catch (e) { return []; }
 }
 
 function writeGrid(range, values) {
@@ -1915,7 +1930,7 @@ zHT.thrPort.onmessage = (event) => {
         cursor.gotoEnd(false);
         cursor.collapseToEnd();
         const container = doc.getEmbeddedObjects();
-        const before = Array.from(container.getElementNames() || []).length;
+        const before = toArray(container.getElementNames()).length;
 
         const obj = doc.createInstance('com.sun.star.text.TextEmbeddedObject');
         if (!obj) throw new Error('Could not create a TextEmbeddedObject (embedded objects unsupported in this build)');
@@ -1931,7 +1946,7 @@ zHT.thrPort.onmessage = (event) => {
         if (params.height_mm) setUnoProp(obj, 'Height', Module.uno_Type.Long(), Math.round(Number(params.height_mm) * 100));
 
         textObj.insertTextContent(cursor, obj, false);
-        const names = Array.from(container.getElementNames() || []);
+        const names = toArray(container.getElementNames());
         if (names.length <= before) {
           throw new Error('Embedded object was not inserted: LibreOffice accepted the call but created no object.');
         }
