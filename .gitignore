@@ -14,3 +14,4 @@ mcp-libre-output/
 .DS_Store
 Thumbs.db
 *.swp
+__pycache__/

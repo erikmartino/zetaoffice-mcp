@@ -62,7 +62,7 @@
     {
       "id": "A5",
       "group": "cookbook",
-      "prompt": "Insert x = {-b +- sqrt{b^2 - 4ac}} over 2a as a native Math object into a new Writer document; save formula.odt.",
+      "prompt": "Create bench/out/A5/formula.odt with a short paragraph and the formula `x = {-b +- sqrt{b^2 - 4ac}} over 2a` as a native Math object. Save the ODT.",
       "output_dir": "bench/out/A5",
       "checks": [
         "ODT has a Math object",

@@ -127,7 +127,7 @@ def check_a6(d):
     return [
         ("xlsx exists", bool(xlsx), xlsx),
         ("freeze pane", "<pane" in sheet, ""),
-        ("bold style", "<b/>" in styles, ""),
+        ("bold style", bool(re.search(r'<b(?:\s+val="(?:true|1)")?\s*/>', styles)), ""),
         ("column widths", "<cols>" in sheet, ""),
     ]
 
