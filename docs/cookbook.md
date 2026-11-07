@@ -586,6 +586,59 @@ return { pending, remaining };
 `pending > 0` and `remaining === 0` are the verification. Do not read
 `RedlineText`/`RedlineDescription` (not properties on this build).
 
+### Footnote and annotation comment (B6 fast path)
+
+The `comments` tool is a stub; a real comment is a `TextField.Annotation`.
+
+```js
+const U = (o) => tools.zetaoffice.uno(o);
+const doc = await tools.zetaoffice.document({ action: "create", doc_type: "writer" });
+const h = doc.handle.$h;
+await tools.zetaoffice.text({ action: "insert", content:
+  "The quarterly report is ready for internal review.\n" +
+  "All figures were verified by the finance team.\n" });
+
+const p1 = await tools.zetaoffice.structure({ action: "paragraph", n: 1 });
+const text = (await U({ op: "call", h, name: "getText" })).value.$h;
+const cur = (await U({ op: "call", h: text, name: "createTextCursor" })).value.$h;
+await U({ op: "call", h: cur, name: "gotoStart", args: [false] });
+await U({ op: "call", h: cur, name: "goRight", args: [p1.end - p1.start, false] });
+await U({ op: "call", h: cur, name: "collapseToEnd" });
+const foot = (await U({ op: "call", h, name: "createInstance",
+  args: ["com.sun.star.text.Footnote"] })).value.$h;
+await U({ op: "call", h: text, name: "insertTextContent",
+  args: [{ $h: cur }, { $h: foot }, false] });
+
+const fns = (await U({ op: "query", h,
+  iface: "com.sun.star.text.XFootnotesSupplier" })).value.$h;
+const coll = (await U({ op: "call", h: fns, name: "getFootnotes" })).value.$h;
+const fn = (await U({ op: "call", h: coll, name: "getByIndex", args: [0] })).value.$h;
+const fcur = (await U({ op: "call", h: fn, name: "createTextCursor" })).value.$h;
+await U({ op: "call", h: fn, name: "insertString", args: [{ $h: fcur },
+  "Figures cross-checked against the ledger export.", false] });
+
+const p2 = await tools.zetaoffice.structure({ action: "paragraph", n: 2 });
+const c2 = (await U({ op: "call", h: text, name: "createTextCursor" })).value.$h;
+await U({ op: "call", h: c2, name: "gotoStart", args: [false] });
+await U({ op: "call", h: c2, name: "goRight", args: [p2.end, false] });
+await U({ op: "call", h: c2, name: "collapseToEnd" });
+const ann = (await U({ op: "call", h, name: "createInstance",
+  args: ["com.sun.star.text.TextField.Annotation"] })).value.$h;
+await U({ op: "set", h: ann, name: "Author", value: "Reviewer" });
+await U({ op: "set", h: ann, name: "Initials", value: "RV" });
+await U({ op: "set", h: ann, name: "Content", value: "Please confirm sign-off." });
+await U({ op: "call", h: text, name: "insertTextContent",
+  args: [{ $h: c2 }, { $h: ann }, false] });
+
+const fnCount = (await U({ op: "call", h: coll, name: "getCount" })).value;
+await tools.zetaoffice.save({ action: "export",
+  file_path: "bench/out/B6/notes.odt", export_format: "odt" });
+return { fnCount };
+```
+
+Footnote text is inserted through the footnote's own text cursor. The
+annotation field count/Author/Content are the comment verification.
+
 ### Math formula
 
 ```
