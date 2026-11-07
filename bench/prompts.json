@@ -17,6 +17,10 @@
     "explore": {
       "tool_calls": 30,
       "seconds": 300
+    },
+    "complex": {
+      "tool_calls": 40,
+      "seconds": 600
     }
   },
   "prompts": [
@@ -414,6 +418,84 @@
         "rectangle",
         "ellipse",
         "pdf exists"
+      ]
+    },
+    {
+      "id": "E1",
+      "group": "complex",
+      "prompt": "Create bench/out/E1/annual.odt - a multi-section annual report. Include a Title and Subtitle, three Heading 1 sections each with one paragraph, a native 4-column table (Item, Q1, Q2, Total) with 4 data rows and a total row using a Writer sum formula, an embedded Calc sheet (3 columns x 4 rows) with a column chart, a footnote in the first section, a header reading \"Annual Report\" and a footer with a page number. Export bench/out/E1/annual.pdf as well and save the ODT.",
+      "output_dir": "bench/out/E1",
+      "checks": [
+        "odt exists",
+        "native table",
+        "sum formula",
+        "embedded sheet",
+        "chart",
+        "footnote",
+        "header",
+        "pdf exists"
+      ]
+    },
+    {
+      "id": "E2",
+      "group": "complex",
+      "prompt": "Create bench/out/E2/budget.xlsx - a three-sheet budget workbook. Inputs has a named range RateList (A1:A3) and a data-validation list in B2:B10; Monthly has dates in A (6 rows) and amounts in B; Summary has cross-sheet formulas (SUM and AVERAGE of Monthly), currency formatting, a line chart with a date X axis, and frozen header rows. Export the xlsx.",
+      "output_dir": "bench/out/E2",
+      "checks": [
+        "xlsx exists",
+        "3 sheets",
+        "cross-sheet formula",
+        "named range",
+        "data validation",
+        "date axis",
+        "freeze",
+        "currency"
+      ]
+    },
+    {
+      "id": "E3",
+      "group": "complex",
+      "prompt": "Create bench/out/E3/launch.pptx - a five-slide product launch deck: cover, agenda, a 3x3 table slide, an image slide using bench/assets/sample.png, and a closing slide. Add speaker notes to slides 2 and 4. Export bench/out/E3/launch.pdf too.",
+      "output_dir": "bench/out/E3",
+      "checks": [
+        "pptx exists",
+        "5 slides",
+        "table",
+        "image",
+        "notes on 2 slides",
+        "pdf exists"
+      ]
+    },
+    {
+      "id": "E4",
+      "group": "complex",
+      "prompt": "Create bench/out/E4/policy.odt - a policy document with a Title, an intro paragraph linking to a bookmark named details on the second section, three Heading 1 sections, a table of contents, a footnote in the first section, and a footer with page numbers. Export bench/out/E4/policy.pdf.",
+      "output_dir": "bench/out/E4",
+      "checks": [
+        "odt exists",
+        "toc",
+        "bookmark",
+        "internal link",
+        "footnote",
+        "pdf exists"
+      ]
+    },
+    {
+      "id": "E5",
+      "group": "complex",
+      "prompt": "Create bench/out/E5/brief.odt - a landscape A4 project brief with 1.5 cm margins, a header \"Project Brief\", a footer page number, a native 3-column table with 3 data rows and a sum total, an embedded Calc sheet (2x3) with a column chart, and bench/assets/sample.png with a caption. Export DOCX and PDF.",
+      "output_dir": "bench/out/E5",
+      "checks": [
+        "odt exists",
+        "landscape",
+        "header",
+        "page-number field",
+        "table",
+        "sum",
+        "embedded sheet",
+        "picture",
+        "docx",
+        "pdf"
       ]
     }
   ]

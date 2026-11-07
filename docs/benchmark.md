@@ -182,6 +182,19 @@ find gaps, then generalize the mechanism (not the prompt).
 | D6 | `bench/out/D6/embed.odt`: paragraph + embedded Writer with two paragraphs. | embedded Writer object; 2 paragraphs |
 | D7 | `bench/out/D7/shapes.odg`: rectangle + ellipse; export PDF. | rect; ellipse; PDF |
 
+## E — long, composed tasks
+
+Multi-part briefs that chain several mechanisms. These test planning and state
+management more than any single API.
+
+| ID | Prompt | Acceptance checks |
+| --- | --- | --- |
+| E1 | Annual report: title, 3 sections, 4-col table + sum, embedded Calc+chart, footnote, header/footer, ODT+PDF. | table, sum, embed, chart, footnote, header, PDF |
+| E2 | 3-sheet budget: named range, validation, dates, cross-sheet SUM/AVERAGE, currency, date-axis chart, freeze. | 3 sheets, cross-sheet formula, name, validation, date axis, freeze, currency |
+| E3 | 5-slide launch deck: table slide, image slide, notes on 2 slides, PPTX+PDF. | 5 slides, table, image, 2 notes, PDF |
+| E4 | Policy doc: TOC, bookmark, internal link, footnote, page-number footer, ODT+PDF. | TOC, bookmark, link, footnote, PDF |
+| E5 | Landscape brief: margins, header/footer, table+sum, embedded Calc+chart, picture+caption, DOCX+PDF. | landscape, header, page field, table/sum, embed, picture, DOCX, PDF |
+
 ## Recording
 
 ```

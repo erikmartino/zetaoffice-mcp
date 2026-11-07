@@ -434,6 +434,102 @@ def check_d7(d):
     ]
 
 
+def check_e1(d):
+    odt, pdf = first(d, ".odt"), first(d, ".pdf")
+    xml = zip_text(odt, "content.xml") if odt else ""
+    names = zip_names(odt) if odt else []
+    text = pdf_text(pdf) if pdf else ""
+    return [
+        ("odt exists", bool(odt), odt),
+        ("native table", "<table:table" in xml, ""),
+        ("sum formula", "ooow:sum" in xml or "sum&lt;" in xml, ""),
+        ("embedded sheet", any(n.startswith("Object 1/") for n in names), ""),
+        ("chart", any("Chart" in n for n in names), ""),
+        ("footnote", "text:footnote" in xml or "text:note" in xml, ""),
+        ("header", "Annual Report" in text, ""),
+        ("pdf exists", bool(pdf), pdf),
+    ]
+
+
+def check_e2(d):
+    xlsx = first(d, ".xlsx")
+    names = zip_names(xlsx) if xlsx else []
+    wb = zip_text(xlsx, "xl/workbook.xml") if xlsx else ""
+    styles = zip_text(xlsx, "xl/styles.xml") if xlsx else ""
+    sheets = {n: zip_text(xlsx, n) for n in names if re.match(r"xl/worksheets/sheet\d+\.xml$", n)}
+    summary = sheets.get("xl/worksheets/sheet3.xml", "")
+    chart = zip_text(xlsx, "xl/charts/chart1.xml") if xlsx else ""
+    any_sheet = " ".join(sheets.values())
+    return [
+        ("xlsx exists", bool(xlsx), xlsx),
+        ("3 sheets", len(sheets) >= 3, str(len(sheets))),
+        ("cross-sheet formula", bool(re.search(r"<f[^>]*>[^<]*[A-Za-z_ ]+!", summary)), ""),
+        ("named range", "RateList" in wb, ""),
+        ("data validation", any("<dataValidation" in x for x in sheets.values()), ""),
+        ("date axis", "dateAx" in chart, ""),
+        ("freeze", 'state="frozen"' in any_sheet, ""),
+        ("currency", ("$" in styles or "currency" in styles.lower()), ""),
+    ]
+
+
+def check_e3(d):
+    pptx, pdf = first(d, ".pptx"), first(d, ".pdf")
+    names = zip_names(pptx) if pptx else []
+    slides = [n for n in names if re.match(r"ppt/slides/slide\d+\.xml$", n)]
+    notes = [n for n in names if re.match(r"ppt/notesSlides/notesSlide\d+\.xml$", n)]
+    notes_text = sum(1 for n in notes if re.search(r"<a:t>[^<]+", zip_text(pptx, n))) if pptx else 0
+    media = [n for n in names if n.startswith("ppt/media/")]
+    table = any("<a:tbl" in zip_text(pptx, n) for n in slides) if pptx else False
+    return [
+        ("pptx exists", bool(pptx), pptx),
+        ("5 slides", len(slides) >= 5, str(len(slides))),
+        ("table", table, ""),
+        ("image", bool(media), str(len(media))),
+        ("notes on 2 slides", notes_text >= 2, str(notes_text)),
+        ("pdf exists", bool(pdf), pdf),
+    ]
+
+
+def check_e4(d):
+    odt, pdf = first(d, ".odt"), first(d, ".pdf")
+    xml = zip_text(odt, "content.xml") if odt else ""
+    return [
+        ("odt exists", bool(odt), odt),
+        ("toc", "text:table-of-content" in xml, ""),
+        ("bookmark", "text:bookmark" in xml, ""),
+        ("internal link", 'xlink:href="#details"' in xml, ""),
+        ("footnote", "text:footnote" in xml or "text:note" in xml, ""),
+        ("pdf exists", bool(pdf), pdf),
+    ]
+
+
+def check_e5(d):
+    odt, docx, pdf = first(d, ".odt"), first(d, ".docx"), first(d, ".pdf")
+    xml = zip_text(odt, "content.xml") if odt else ""
+    styles = zip_text(odt, "styles.xml") if odt else ""
+    names = zip_names(odt) if odt else []
+    text = pdf_text(pdf) if pdf else ""
+    landscape = False
+    try:
+        raw = open(pdf, "rb").read().decode("latin-1", "replace")
+        m = re.search(r"MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)", raw)
+        landscape = bool(m) and float(m.group(1)) > float(m.group(2))
+    except Exception:
+        pass
+    return [
+        ("odt exists", bool(odt), odt),
+        ("landscape", landscape, ""),
+        ("header", "Project Brief" in text, ""),
+        ("page-number field", "page-number" in xml or "page-number" in styles, ""),
+        ("table", "<table:table" in xml, ""),
+        ("sum", "ooow:sum" in xml or "sum&lt;" in xml, ""),
+        ("embedded sheet", any(n.startswith("Object 1/") for n in names), ""),
+        ("picture", any(n.startswith("Pictures/") for n in names), ""),
+        ("docx", bool(docx), docx),
+        ("pdf", bool(pdf), pdf),
+    ]
+
+
 CHECKS = {
     "A1": check_a1, "A2": check_a2, "A3": check_a3, "A4": check_a4, "A5": check_a5,
     "A6": check_a6, "A8": check_a8, "A9": check_a9, "A10": check_a10,
@@ -444,6 +540,7 @@ CHECKS = {
     "C5": check_c5, "C6": check_c6,
     "D1": check_d1, "D2": check_d2, "D3": check_d3, "D4": check_d4,
     "D5": check_d5, "D6": check_d6, "D7": check_d7,
+    "E1": check_e1, "E2": check_e2, "E3": check_e3, "E4": check_e4, "E5": check_e5,
 }
 
 
