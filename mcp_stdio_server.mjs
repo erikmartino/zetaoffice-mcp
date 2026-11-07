@@ -642,6 +642,80 @@ describe is authoritative.`,
 );
 
 // =============================================================================
+// TOOL: embed (real OLE objects inside a Writer document)
+// =============================================================================
+server.tool(
+  "embed",
+  `Insert a real OLE embedded document into the active Writer text document.
+
+- service: calc | writer | impress | draw | math (or a CLSID GUID).
+- width_mm / height_mm: frame size in millimetres (set them before inserting).
+- anchor: "inline" (as character, default) or "paragraph".
+- values: optional 2-D array written into the embedded Calc model (first sheet).
+
+Returns {name, clsid, object: {$h}, model: {$h}, values}. Use the model handle
+with the uno tool (call/get/set) to fill cells, add charts, etc. The OLE
+preview is captured when the object is created; resizing the frame later only
+stretches it.`,
+  {
+    service: z.enum(["calc", "writer", "impress", "draw", "math"]).optional()
+      .describe("Embedded document type (default calc)"),
+    width_mm: z.number().optional().describe("Frame width in millimetres"),
+    height_mm: z.number().optional().describe("Frame height in millimetres"),
+    anchor: z.enum(["inline", "paragraph"]).optional().describe("Anchor mode (default inline)"),
+    values: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))).optional()
+      .describe("Optional 2-D array written into the embedded Calc sheet")
+  },
+  async ({ service, width_mm, height_mm, anchor, values }) => {
+    return jsonResponse(await callLibreoffice("/tools/insert_embedded_object_live", "POST", {
+      service: service || "calc",
+      width_mm,
+      height_mm,
+      anchor: anchor === "paragraph" ? "paragraph" : "as_char",
+      values
+    }));
+  }
+);
+
+// =============================================================================
+// TOOL: cookbook (task recipes with exact call sequences)
+// =============================================================================
+server.tool(
+  "cookbook",
+  `Return the ZetaOffice task cookbook: runnable recipes with exact call
+sequences, verification steps and known gotchas.
+
+Use it before writing UNO orchestration by hand. Pass topic to get one section
+(e.g. "embed", "chart", "save", "text", "describe", "gotchas"); omit it for the
+whole document.`,
+  {
+    topic: z.string().optional().describe("Section keyword, e.g. 'embed' or 'chart'")
+  },
+  async ({ topic }) => {
+    const file = path.join(__dirname, "docs", "cookbook.md");
+    let text;
+    try {
+      text = fs.readFileSync(file, "utf8");
+    } catch (e) {
+      return toolError("cookbook", "Cookbook not found.", `Expected ${file}.`);
+    }
+    if (topic) {
+      const re = new RegExp("^##\\s+.*" + topic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ".*$", "im");
+      const m = re.exec(text);
+      if (m) {
+        const start = m.index;
+        const next = text.indexOf("\n## ", start + 1);
+        text = text.slice(start, next === -1 ? undefined : next);
+      } else {
+        text = `No section matching '${topic}'. Sections:\n` +
+          (text.match(/^##\s+.*$/gm) || []).join("\n");
+      }
+    }
+    return { content: [{ type: "text", text }] };
+  }
+);
+
+// =============================================================================
 // CONSOLIDATED TOOL 5: search
 // Actions: find, replace, replace_all
 // =============================================================================

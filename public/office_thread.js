@@ -262,6 +262,21 @@ function applyParagraphStyle(doc, cursor, styleName) {
 // text approximation). Requires the Math module in the LOWA build.
 const MATH_CLSID = '078B7ABA-54FC-457F-8551-6147E776A997';
 const MATH_OBJECT_SERVICE = 'com.sun.star.text.TextEmbeddedObject';
+
+// OLE class IDs for LibreOffice's embedded document types (from the
+// org.openoffice.Office.Embedding configuration). Service names are NOT valid
+// CLSIDs - the CLSID property only accepts these GUIDs.
+const EMBED_CLSIDS = {
+  calc: '47BBB4CB-CE4C-4E80-A591-42D9AE74950F',
+  spreadsheet: '47BBB4CB-CE4C-4E80-A591-42D9AE74950F',
+  writer: '8BC6B165-B1B2-4EDD-AA47-DAE2EE689DD6',
+  text: '8BC6B165-B1B2-4EDD-AA47-DAE2EE689DD6',
+  impress: '9176E48A-637A-4D1F-803B-99D9BFAC1047',
+  presentation: '9176E48A-637A-4D1F-803B-99D9BFAC1047',
+  draw: '4BAB8970-8A3B-45B3-991C-CBEEAC6BD5E3',
+  math: '078B7ABA-54FC-457F-8551-6147E776A997',
+  formula: '078B7ABA-54FC-457F-8551-6147E776A997',
+};
 const PARAGRAPH_ADJUST = { left: 'LEFT', right: 'RIGHT', justify: 'BLOCK', center: 'CENTER' };
 
 // Embedded objects (including Math) are exposed by the document's
@@ -692,6 +707,13 @@ function unoEncode(v) {
   if (t === 'function') return { $m: 1 };
   if (t === 'number' || t === 'string' || t === 'boolean') return v;
   if (Array.isArray(v)) return v.map(unoEncode);
+  // ZetaJS sequence proxies expose size()/get(); encode them as arrays.
+  if (typeof v.size === 'function' && typeof v.get === 'function') {
+    const out = [];
+    const n = v.size();
+    for (let i = 0; i < n; i++) out.push(unoEncode(v.get(i)));
+    return out;
+  }
   try {
     const ty = zetajs.getAnyType(v);
     if (ty && typeof ty.getTypeClass === 'function') {
@@ -812,6 +834,24 @@ function unoDescribe(req) {
         out.implementation = si.getImplementationName();
       }
     } catch (e) { /* optional interface */ }
+    try {
+      const info = obj.getPropertySetInfo();
+      const props = info.getProperties();
+      out.properties = [];
+      for (let i = 0; i < props.length; i++) {
+        const p = props[i];
+        const entry = { name: p.Name };
+        try {
+          const ty = p.Type;
+          if (ty && ty.typeName) entry.type = String(ty.typeName);
+        } catch (e) { /* optional */ }
+        try {
+          const attrs = p.Attributes;
+          entry.readOnly = !!(attrs & 1); // PropertyAttribute::READONLY
+        } catch (e) { /* optional */ }
+        out.properties.push(entry);
+      }
+    } catch (e) { /* not a property set */ }
     return out;
   }
 
@@ -930,15 +970,37 @@ function unoDispatch(req) {
       return unoEncode(unoGetMember(unoGetHandle(req.h), req.name));
     }
     case 'set': {
+      if (req.v === undefined) {
+        throw new Error("set needs a value: pass 'v' (use null to clear the property)");
+      }
       unoSetMember(unoGetHandle(req.h), req.name, req.v);
       return null;
     }
     case 'call': {
       const obj = unoGetHandle(req.h);
       const fn = obj[req.name];
-      if (typeof fn !== 'function') throw new Error(`'${req.name}' is not a method`);
+      if (typeof fn !== 'function') {
+        throw new Error(`'${req.name}' is not a method on handle ${req.h}`);
+      }
       const args = (req.args || []).map(unoDecode);
-      return unoEncode(fn.apply(obj, args));
+      try {
+        return unoEncode(fn.apply(obj, args));
+      } catch (e) {
+        throw new Error(`${req.name}(...) failed: ${(e && e.message) ? e.message : String(e)}`);
+      }
+    }
+    case 'handles': {
+      const out = [];
+      for (const [id, obj] of unoObjects) {
+        if (out.length >= 100) break;
+        let implementation = null;
+        try {
+          const si = queryInterface(obj, 'com.sun.star.lang.XServiceInfo');
+          if (si) implementation = si.getImplementationName();
+        } catch (e) { /* optional */ }
+        out.push({ h: id, implementation });
+      }
+      return out;
     }
     case 'query': {
       const obj = unoGetHandle(req.h);
@@ -1834,8 +1896,66 @@ zHT.thrPort.onmessage = (event) => {
 
       case 'uno_live': {
         // Generic UNO escape hatch: one tool for the whole com.sun.star API.
-        const value = unoDispatch(params);
-        result = { success: true, op: params.op, value };
+        // Accept 'value' as well as 'v' so the MCP wrapper and raw HTTP agree.
+        const req = Object.assign({}, params);
+        if (req.v === undefined && req.value !== undefined) req.v = req.value;
+        const value = unoDispatch(req);
+        result = { success: true, op: req.op, value };
+        break;
+      }
+
+      case 'insert_embedded_object_live': {
+        const doc = requireTextDoc();
+        const key = String(params.service || params.clsid || 'calc').toLowerCase();
+        const clsid = EMBED_CLSIDS[key] || (String(params.clsid || '').match(/^[0-9a-f-]{36}$/i) ? String(params.clsid) : null);
+        if (!clsid) throw new Error(`Unknown embedded service '${params.service}'. Use calc, writer, impress, draw, math or a CLSID.`);
+
+        const textObj = doc.getText();
+        const cursor = textObj.createTextCursor();
+        cursor.gotoEnd(false);
+        cursor.collapseToEnd();
+        const container = doc.getEmbeddedObjects();
+        const before = Array.from(container.getElementNames() || []).length;
+
+        const obj = doc.createInstance('com.sun.star.text.TextEmbeddedObject');
+        if (!obj) throw new Error('Could not create a TextEmbeddedObject (embedded objects unsupported in this build)');
+        setUnoProp(obj, 'CLSID', Module.uno_Type.String(), clsid);
+        if (params.anchor === 'paragraph') {
+          setUnoProp(obj, 'AnchorType', Module.uno_Type.Enum('com.sun.star.text.TextContentAnchorType'),
+            css.text.TextContentAnchorType.AT_PARAGRAPH);
+        } else {
+          setUnoProp(obj, 'AnchorType', Module.uno_Type.Enum('com.sun.star.text.TextContentAnchorType'),
+            css.text.TextContentAnchorType.AS_CHARACTER);
+        }
+        if (params.width_mm) setUnoProp(obj, 'Width', Module.uno_Type.Long(), Math.round(Number(params.width_mm) * 100));
+        if (params.height_mm) setUnoProp(obj, 'Height', Module.uno_Type.Long(), Math.round(Number(params.height_mm) * 100));
+
+        textObj.insertTextContent(cursor, obj, false);
+        const names = Array.from(container.getElementNames() || []);
+        if (names.length <= before) {
+          throw new Error('Embedded object was not inserted: LibreOffice accepted the call but created no object.');
+        }
+        const name = names[names.length - 1];
+
+        const model = obj.getEmbeddedObject();
+        let written = null;
+        if (model && Array.isArray(params.values) && typeof model.getSheets === 'function') {
+          const sheet = model.getSheets().getByIndex(0);
+          const height = params.values.length;
+          const width = Math.max(1, ...params.values.map((r) => (Array.isArray(r) ? r.length : 1)));
+          const range = sheet.getCellRangeByPosition(0, 0, width - 1, Math.max(0, height - 1));
+          written = writeGrid(range, params.values);
+        }
+
+        result = {
+          success: true,
+          message: `Embedded '${key}' object '${name}' and returned its model`,
+          name,
+          clsid,
+          object: { $h: unoPut(obj) },
+          model: model ? { $h: unoPut(model) } : null,
+          values: written,
+        };
         break;
       }
 
