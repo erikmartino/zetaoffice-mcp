@@ -639,6 +639,43 @@ return { fnCount };
 Footnote text is inserted through the footnote's own text cursor. The
 annotation field count/Author/Content are the comment verification.
 
+### DRAFT watermark (B10 fast path)
+
+`document create` clears text but **not** drawing-page shapes, so clear the
+page first. Keep the watermark horizontal: rotated text is visually fine but
+`pdftotext` splits it into single letters, which fails text-based checks.
+
+```js
+const U = (o) => tools.zetaoffice.uno(o);
+const doc = await tools.zetaoffice.document({ action: "create", doc_type: "writer" });
+const h = doc.handle.$h;
+await tools.zetaoffice.text({ action: "insert", content: "Draft Document\nBody text.\n" });
+const pages = (await U({ op: "call", h, name: "getDrawPages" })).value.$h;
+const page = (await U({ op: "call", h: pages, name: "getByIndex", args: [0] })).value.$h;
+for (let i = (await U({ op: "call", h: page, name: "getCount" })).value - 1; i >= 0; i--) {
+  const old = (await U({ op: "call", h: page, name: "getByIndex", args: [i] })).value.$h;
+  await U({ op: "call", h: page, name: "remove", args: [{ $h: old }] });
+}
+const shape = (await U({ op: "call", h, name: "createInstance",
+  args: ["com.sun.star.drawing.TextShape"] })).value.$h;
+await U({ op: "call", h: page, name: "add", args: [{ $h: shape }] });
+await U({ op: "call", h: shape, name: "setSize",
+  args: [{ $s: "com.sun.star.awt.Size", Width: 18000, Height: 4000 }] });
+await U({ op: "call", h: shape, name: "setPosition",
+  args: [{ $s: "com.sun.star.awt.Point", X: 2000, Y: 3000 }] });
+await U({ op: "call", h: shape, name: "setString", args: ["DRAFT"] });
+for (const [name, value] of Object.entries({
+  CharHeight: { $f: 60 }, CharWeight: { $f: 150 }, CharColor: 12500670,
+  TextAutoGrowHeight: false, TextAutoGrowWidth: false, TextWordWrap: false,
+  TextHorizontalAdjust: 1, TextVerticalAdjust: 1,
+})) await U({ op: "set", h: shape, name, value });
+await U({ op: "set", h: shape, name: "ZOrder", value: 0 });
+
+await tools.zetaoffice.save({ action: "export", file_path: "bench/out/B10/draft.odt", export_format: "odt" });
+await tools.zetaoffice.save({ action: "export", file_path: "bench/out/B10/draft.pdf", export_format: "pdf" });
+return { shapes: (await U({ op: "call", h: page, name: "getCount" })).value };
+```
+
 ### Math formula
 
 ```
