@@ -54,10 +54,10 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
     supplier/control `setVisualAreaSize` path.
 14. **Track changes has no high-level support.** Set `RecordChanges` on the
     model; accept with `DispatchHelper.executeDispatch(".uno:AcceptAllTrackedChanges")`.
-15. **Unregistered enum types: use `set_enum`.** Some enum type names are not
-    registered (`ReferenceFieldSource`, `ReferenceFieldPart`). `set` silently
-    leaves them at 0; `uno {op:"set_enum", name, value:<number>}` reads the Type
-    from the property descriptor and works.
+15. **`set_enum` is the general fix for silent 0s.** Short and enum
+    properties can be inferred as Long by `set`: `NumberingLevel`, `AxisType`,
+    `SequenceValue`, `ReferenceFieldSource`, `ReferenceFieldPart`. `set_enum`
+    reads the Type from the property descriptor and works; read the value back.
 16. **Conditional formatting is a known engine gap.** The range-level
     `ConditionalFormat` entries are not serialized to ODS/XLSX in this build.
     Do not spend calls on it; note the limitation.

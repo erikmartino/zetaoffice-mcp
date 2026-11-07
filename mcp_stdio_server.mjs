@@ -615,9 +615,10 @@ com.sun.star interface without needing a dedicated tool.
 - root: handle to the UNO component context.
 - get(h, name): attribute, getX() accessor or property value.
 - set(h, name, value): attribute or property.
-- set_enum(h, name, value): set an enum property by its numeric value, using
-  the type carried by the property (works for enum types that are not
-  registered by name, e.g. ReferenceFieldSource).
+- set_enum(h, name, value): set a numeric or enum property using the type
+  carried by the property itself. Use it when set reports success but the
+  value stays 0 (short properties like NumberingLevel/AxisType, and enums whose
+  type name is not registered such as ReferenceFieldSource).
 - call(h, name, args): invoke a method.
 - query(h, iface): queryInterface -> handle or null.
 - create(service): createInstanceWithContext (no handle needed).
@@ -929,7 +930,7 @@ pdf (Impress); ods/xlsx/csv where the document type allows it.`,
   {
     action: z.enum(["save", "export"]).describe("Operation to perform"),
     file_path: z.string().optional().describe("Output path, e.g. out.odt (required for 'export')"),
-    export_format: z.enum(["pdf", "docx", "odt", "html", "txt", "odp", "pptx", "ppt", "xlsx", "ods", "csv"]).default("pdf").describe("Output format (for 'export')")
+    export_format: z.enum(["pdf", "docx", "odt", "html", "txt", "odp", "pptx", "ppt", "xlsx", "ods", "csv", "odg", "svg"]).default("pdf").describe("Output format (for 'export')")
   },
   async ({ action, file_path, export_format }) => {
     if (action === "save") {

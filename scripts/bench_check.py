@@ -353,9 +353,10 @@ def check_c6(d):
 def check_d1(d):
     odt = first(d, ".odt")
     xml = zip_text(odt, "content.xml") if odt else ""
+    styles = zip_text(odt, "styles.xml") if odt else ""
     return [
         ("odt exists", bool(odt), odt),
-        ("numbered list", "list-level-style-number" in xml, ""),
+        ("numbered list", "list-level-style-number" in xml or "list-level-style-number" in styles, ""),
         ("nested list", len(re.findall(r"<text:list[ >]", xml)) >= 2, str(len(re.findall(r"<text:list[ >]", xml)))),
         ("5+ list items", len(re.findall(r"<text:list-item", xml)) >= 5, str(len(re.findall(r"<text:list-item", xml)))),
     ]
@@ -375,10 +376,12 @@ def check_d2(d):
 def check_d3(d):
     xlsx = first(d, ".xlsx")
     sheet = zip_text(xlsx, "xl/worksheets/sheet1.xml") if xlsx else ""
+    names = zip_names(xlsx) if xlsx else []
+    tables = " ".join(zip_text(xlsx, n) for n in names if n.startswith("xl/tables/"))
     return [
         ("xlsx exists", bool(xlsx), xlsx),
         ("SUMIF formula", bool(re.search(r"<f[^>]*>[^<]*SUMIF", sheet, re.I)), ""),
-        ("AutoFilter", "<autoFilter" in sheet, ""),
+        ("AutoFilter", "<autoFilter" in sheet or "<autoFilter" in tables, ""),
         ("region totals", len(re.findall(r"SUMIF", sheet, re.I)) >= 2, str(len(re.findall(r"SUMIF", sheet, re.I)))),
     ]
 

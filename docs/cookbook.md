@@ -779,6 +779,77 @@ Enum values used: `SetVariableType.SEQUENCE=1`, `NumberingType.ARABIC=4`,
 derives from `SequenceValue`. `getPresentation(false)` returns the displayed
 text, `getPresentation(true)` the command.
 
+### Writer lists with numbering levels
+
+Apply list paragraph styles, then set the **short** property `NumberingLevel`
+with `set_enum` (a plain `set` silently leaves it at 0). Use a cursor over the
+target paragraph.
+
+```js
+await tools.zetaoffice.text({ action: "insert", content:
+  "Heading\nNumbered one\nNumbered two\nNested A\nNested B\n" });
+await tools.zetaoffice.text({ action: "style", style_name: "Heading 1", paragraph_n: 1 });
+await tools.zetaoffice.text({ action: "style", style_name: "Numbering 123", paragraph_n: 2 });
+await tools.zetaoffice.text({ action: "style", style_name: "Numbering 123", paragraph_n: 3 });
+await tools.zetaoffice.text({ action: "style", style_name: "List 1", paragraph_n: 4 });
+await tools.zetaoffice.text({ action: "style", style_name: "List 1", paragraph_n: 5 });
+
+// cursor over paragraph 4 (nested list), collapse, then set the level
+const p = await tools.zetaoffice.structure({ action: "paragraph", n: 4 });
+const text = (await U({ op: "call", h: doc.handle.$h, name: "getText" })).value.$h;
+const cur = (await U({ op: "call", h: text, name: "createTextCursor" })).value.$h;
+await U({ op: "call", h: cur, name: "gotoStart", args: [false] });
+await U({ op: "call", h: cur, name: "goRight", args: [p.start, false] });
+await U({ op: "set_enum", h: cur, name: "NumberingLevel", value: 1 });
+```
+
+Style names `Numbering 123` and `List 1` are the built-in numbered/bulleted
+lists. Export: ODT stores the list level styles in `styles.xml`.
+
+### Calc: formulas, names, validation and filters
+
+- **Formula separator is `;`** in this build: `=SUMIF($A$2:$A$7;E1;$B$2:$B$7)`.
+  Commas give `Err:508`. The xlsx writer normalizes the syntax on export.
+- **Named range**: `doc.getNamedRanges().addNewByName("StatusList",
+  "$Sheet1.$A$1:$A$3", ...)`, then read the content back.
+- **Data validation**: set `range.Validation` to a PropertyValue sequence, e.g.
+  `Type=LIST`, `Formula1="$Sheet1.$A$1:$A$3"`, `ShowList=true`.
+- **AutoFilter**: select the range and dispatch `.uno:DataFilterAutoFilter`
+  with `DispatchHelper`. In xlsx this exports as a table
+  (`xl/tables/*.xml` with `<autoFilter>`), not as a sheet-level element.
+
+### Writer frames and shapes
+
+- Text frame: create `com.sun.star.text.TextFrame`, size it, insert it with
+  `insertTextContent`, then write through its `getText()`.
+- Rectangle: create `com.sun.star.drawing.RectangleShape`, set position/size,
+  add it to the document's draw page, then `setString("Box")`.
+- `document create` clears text but **not** draw-page shapes; clear the page
+  first when a blank canvas matters.
+
+### Impress: table and picture
+
+Add a `com.sun.star.drawing.TableShape` and a `GraphicObjectShape` to the
+slide's draw page; the picture can be loaded through `GraphicProvider` (URL or
+InputStream) and assigned to the shape's `Graphic`. The pptx must contain
+`<a:tbl>` in the slide XML and a file under `ppt/media/`.
+
+### Draw: shapes and odg export
+
+```js
+const doc = await tools.zetaoffice.document({ action: "create", doc_type: "draw" });
+const U = (o) => tools.zetaoffice.uno(o);
+const pages = (await U({ op: "call", h: doc.handle.$h, name: "getDrawPages" })).value.$h;
+const page = (await U({ op: "call", h: pages, name: "getByIndex", args: [0] })).value.$h;
+const rect = (await U({ op: "call", h: doc.handle.$h, name: "createInstance",
+  args: ["com.sun.star.drawing.RectangleShape"] })).value.$h;
+await U({ op: "call", h: page, name: "add", args: [{ $h: rect }] });
+// set Position/Size, then add an EllipseShape the same way
+await tools.zetaoffice.save({ action: "save", file_path: "out/shapes.odg" });
+await tools.zetaoffice.save({ action: "export", file_path: "out/shapes.pdf", export_format: "pdf" });
+```
+
+`save` keeps the native `.odg`; `export` with `odg`/`svg` also works now.
 ### Math formula
 
 ```
@@ -853,7 +924,7 @@ Common dead ends and their fix:
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `set` succeeds but nothing changes | missing value (void Any) | pass `v`; `value` is accepted as an alias; read back |
+| `set` succeeds but nothing changes | missing value, or a short/enum inferred as Long | pass `v`; for shorts/enums use `set_enum` (NumberingLevel, AxisType, SequenceValue, ReferenceFieldSource); read back |
 | `insertTextContent` succeeds, object missing | model could not be created, or cursor is a range | GUID CLSID, `collapseToEnd()`, verify count |
 | `[RuntimeException, null]` | LibreOffice raised without a message | read state back, follow the documented order |
 | Sequence comes back as a handle | older bridge build | use a fresh tab / restart the bridge |
