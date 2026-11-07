@@ -539,6 +539,53 @@ Margins and page size are in 1/100 mm (1.5 cm = 1500). Verify by reading
 `IsLandscape`, `Width`/`Height` and the header/footer strings; do not inspect
 the PDF.
 
+### Track changes with UNO (B5 fast path)
+
+The high-level `track_changes` tool is a stub. Use the model flag and redlines:
+
+```js
+const U = (o) => tools.zetaoffice.uno(o);
+const doc = await tools.zetaoffice.document({ action: "create", doc_type: "writer" });
+const h = doc.handle.$h;
+await tools.zetaoffice.text({ action: "insert", content:
+  "The quarterly report is ready for review.\n" +
+  "All figures have been verified by the finance team.\n" +
+  "The report will be published next Monday.\n" });
+
+await U({ op: "set", h, name: "RecordChanges", value: true });
+const p2 = await tools.zetaoffice.structure({ action: "paragraph", n: 2 });
+const text = (await U({ op: "call", h, name: "getText" })).value.$h;
+const cur = (await U({ op: "call", h: text, name: "createTextCursor" })).value.$h;
+await U({ op: "call", h: cur, name: "gotoStart", args: [false] });
+await U({ op: "call", h: cur, name: "goRight", args: [p2.start, false] });
+await U({ op: "call", h: cur, name: "goRight", args: [p2.end - p2.start, true] });
+await U({ op: "call", h: cur, name: "setString",
+  args: ["All figures were verified by the finance team."] });
+
+const q = (await U({ op: "query", h,
+  iface: "com.sun.star.document.XRedlinesSupplier" })).value.$h;
+const coll = (await U({ op: "call", h: q, name: "getRedlines" })).value.$h;
+const pending = (await U({ op: "call", h: coll, name: "getCount" })).value;
+
+const helper = (await U({ op: "create",
+  service: "com.sun.star.frame.DispatchHelper" })).value.$h;
+const ctrl = (await U({ op: "call", h, name: "getCurrentController" })).value.$h;
+const frame = (await U({ op: "call", h: ctrl, name: "getFrame" })).value.$h;
+const dp = (await U({ op: "query", h: frame,
+  iface: "com.sun.star.frame.XDispatchProvider" })).value.$h;
+await U({ op: "call", h: helper, name: "executeDispatch",
+  args: [{ $h: dp }, ".uno:AcceptAllTrackedChanges", "_self", 0, []] });
+
+const remaining = (await U({ op: "call", h: coll, name: "getCount" })).value;
+await U({ op: "set", h, name: "RecordChanges", value: false });
+await tools.zetaoffice.save({ action: "export",
+  file_path: "bench/out/B5/changes.odt", export_format: "odt" });
+return { pending, remaining };
+```
+
+`pending > 0` and `remaining === 0` are the verification. Do not read
+`RedlineText`/`RedlineDescription` (not properties on this build).
+
 ### Math formula
 
 ```

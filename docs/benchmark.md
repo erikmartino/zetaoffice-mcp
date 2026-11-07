@@ -138,7 +138,7 @@ A run is only valid if the environment and the grading are fixed.
 | B2 | Create a Writer document with A4 landscape, 1.5 cm margins, a "Confidential" header and a footer with page numbers. Export PDF. | page setup reflects the values; PDF contains header and page number |
 | B3 | Create a Calc sheet titled "Budget" (merged A1:C1), amounts in C formatted as currency, and a conditional format that highlights Qty > 10. | merge exists; currency number format; one conditional rule |
 | B4 | Add a bookmark named `intro` to paragraph 2 and a hyperlink from paragraph 1 that jumps to it, plus an external `https://` link. | bookmark exists; internal link targets `#intro`; external URL present |
-| B5 | Enable track changes, edit one sentence, list the pending changes, then accept them all. | changes recorded then zero pending; text updated |
+| B5 | Create `bench/out/B5/changes.odt` with a sentence. Enable track changes, edit the sentence, list the pending changes, then accept them all. | changes recorded then zero pending; text updated |
 | B6 | Add a footnote to paragraph 1 and a comment to paragraph 2. | one footnote; one comment anchored to p2 |
 | B7 | Create a document with three Heading 1 sections, insert a table of contents, and update the fields. | TOC present with 3 entries; field results populated |
 | B8 | Create a Calc sheet with `Category` and `Amount` (10 rows), then build a pivot table summing Amount by Category. | pivot exists; sums correct; native pivot object present |

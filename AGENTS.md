@@ -52,10 +52,12 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
     `embed {values, chart:{title,x_title,y_title}}`; it also sizes the OLE
     preview. Do not hand-build chart2, and do not use the failed
     supplier/control `setVisualAreaSize` path.
-14. **Conditional formatting is a known engine gap.** The range-level
+14. **Track changes has no high-level support.** Set `RecordChanges` on the
+    model; accept with `DispatchHelper.executeDispatch(".uno:AcceptAllTrackedChanges")`.
+15. **Conditional formatting is a known engine gap.** The range-level
     `ConditionalFormat` entries are not serialized to ODS/XLSX in this build.
     Do not spend calls on it; note the limitation.
-15. **Verify with tool reads, not artifacts.** Read state back
+16. **Verify with tool reads, not artifacts.** Read state back
     (`structure`, `sheet read`, `embed` counts). Do not unzip packages, run
     `pdftoppm`, or inspect screenshots to find out what happened.
 
