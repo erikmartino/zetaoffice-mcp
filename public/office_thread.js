@@ -353,15 +353,19 @@ function insertPicture(doc, imageBytes, ext, opts) {
   const hadFollowingText = editCursorStart < textObj.getString().length;
   let pos = editCursorStart;
 
-  const FS = (Module && Module.__FS) || (zHT && zHT.FS);
-  if (!FS || typeof FS.writeFile !== 'function') {
-    throw new Error('The Wasm filesystem is not available for the picture bytes');
-  }
-  const safeExt = ['png', 'jpg', 'jpeg', 'gif', 'bmp'].includes(String(ext).toLowerCase())
-    ? String(ext).toLowerCase() : 'png';
-  const fsPath = `/tmp/mcp_picture_${Date.now()}.${safeExt}`;
-  FS.writeFile(fsPath, imageBytes);
-  const url = 'file://' + fsPath;
+  // The URL fallback is optional: bytes go through SequenceInputStream below.
+  // A worker without a writable FS (browser tab) must not fail the insert.
+  let url = null;
+  try {
+    const FS = (Module && Module.__FS) || (zHT && zHT.FS);
+    if (FS && typeof FS.writeFile === 'function') {
+      const safeExt = ['png', 'jpg', 'jpeg', 'gif', 'bmp'].includes(String(ext).toLowerCase())
+        ? String(ext).toLowerCase() : 'png';
+      const fsPath = `/tmp/mcp_picture_${Date.now()}.${safeExt}`;
+      FS.writeFile(fsPath, imageBytes);
+      url = 'file://' + fsPath;
+    }
+  } catch (e) { /* no FS: use the byte-stream path only */ }
 
   const shape = doc.createInstance('com.sun.star.text.TextGraphicObject');
   if (!shape) throw new Error('Could not create a TextGraphicObject');
@@ -393,7 +397,7 @@ function insertPicture(doc, imageBytes, ext, opts) {
   } catch (e) {
     console.warn('[ZetaJS Worker] Could not load picture bytes, falling back to URL:', e);
   }
-  if (!graphic) {
+  if (!graphic && url) {
     // Second chance: let the GraphicProvider load the file URL synchronously.
     try {
       const sm = zHT.context.getServiceManager();
@@ -415,6 +419,7 @@ function insertPicture(doc, imageBytes, ext, opts) {
     }
   }
   if (!graphicSet) {
+    if (!url) throw new Error('Could not load the picture bytes into a graphic');
     setUnoProp(shape, 'GraphicURL', Module.uno_Type.String(), url);
   }
   try {

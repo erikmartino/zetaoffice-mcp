@@ -197,16 +197,20 @@ function requestOnClient(target, tool, params, timeoutMs = 20000) {
 // independent.
 async function syncDocumentToBrowser(browserWs) {
   if (!browserWs || browserWs.__isNodeRuntime) return;
-  const node = getNodeRuntimeClient();
-  if (!node) return;
+  // Mirror from the worker that owns the session document, not blindly from the
+  // Node runtime: document create/embed may have happened on a browser tab.
+  const source = (sessionClient && sessionClient !== browserWs && sessionClient.readyState === 1)
+    ? sessionClient
+    : getNodeRuntimeClient();
+  if (!source) return;
   try {
-    const info = await requestOnClient(node, 'get_document_info_live', {}, 15000).catch(() => null);
+    const info = await requestOnClient(source, 'get_document_info_live', {}, 15000).catch(() => null);
     const type = (info && info.type) || 'writer';
     // Only a Writer document can be judged empty by character count; Calc and
     // Impress documents report 0 characters even when they hold data.
     if (type === 'writer' && info && info.character_count === 0) return;
     const format = { writer: 'odt', calc: 'ods', impress: 'odp', draw: 'odg' }[type] || 'odt';
-    const exported = await requestOnClient(node, 'export_document_live', { format }, 25000);
+    const exported = await requestOnClient(source, 'export_document_live', { format }, 25000);
     if (!exported || !exported.data) {
       console.log('[Sync] No document data from the Node runtime; skipping mirror');
       return;

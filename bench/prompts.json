@@ -117,7 +117,7 @@
     {
       "id": "A10",
       "group": "cookbook",
-      "prompt": "Create bench/out/A10/note.odt with a heading and a paragraph, then insert a local PNG as a picture below it. Save ODT.",
+      "prompt": "Create bench/out/A10/note.odt with a heading and a paragraph, then insert bench/assets/sample.png as a picture below it. Save the ODT.",
       "output_dir": "bench/out/A10",
       "checks": [
         "picture count 1",
@@ -128,7 +128,7 @@
     {
       "id": "B1",
       "group": "novel",
-      "prompt": "Create a Writer document with a 5x3 table (Item, Qty, Price), fill 4 rows, and a total row whose Price cell sums the column. Export ODT.",
+      "prompt": "Create bench/out/B1/table.odt: a Writer document with a 5x3 table (Item, Qty, Price), fill 4 data rows, and a total row whose Price cell sums the column. Export the ODT.",
       "output_dir": "bench/out/B1",
       "checks": [
         "native table",
@@ -139,7 +139,7 @@
     {
       "id": "B2",
       "group": "novel",
-      "prompt": "Create a Writer document with A4 landscape, 1.5 cm margins, a \"Confidential\" header and a footer with page numbers. Export PDF.",
+      "prompt": "Create bench/out/B2/report.odt: a Writer document with A4 landscape, 1.5 cm margins, a \"Confidential\" header and a footer with page numbers. Export bench/out/B2/report.pdf.",
       "output_dir": "bench/out/B2",
       "checks": [
         "page setup applied",
@@ -150,7 +150,7 @@
     {
       "id": "B3",
       "group": "novel",
-      "prompt": "Create a Calc sheet titled Budget (merged A1:C1), amounts in C formatted as currency, and a conditional format that highlights Qty > 10.",
+      "prompt": "Create bench/out/B3/budget.xlsx: a Calc sheet titled Budget (merged A1:C1), amounts in C formatted as currency, and a conditional format that highlights Qty > 10.",
       "output_dir": "bench/out/B3",
       "checks": [
         "merged range",
@@ -161,7 +161,7 @@
     {
       "id": "B4",
       "group": "novel",
-      "prompt": "Add a bookmark named intro to paragraph 2 and a hyperlink from paragraph 1 that jumps to it, plus an external https:// link.",
+      "prompt": "Create bench/out/B4/links.odt with two paragraphs. Add a bookmark named intro to paragraph 2 and a hyperlink from paragraph 1 that jumps to it, plus an external https:// link.",
       "output_dir": "bench/out/B4",
       "checks": [
         "bookmark exists",
@@ -172,7 +172,7 @@
     {
       "id": "B5",
       "group": "novel",
-      "prompt": "Enable track changes, edit one sentence, list the pending changes, then accept them all.",
+      "prompt": "Create bench/out/B5/changes.odt with a sentence. Enable track changes, edit the sentence, list the pending changes, then accept them all.",
       "output_dir": "bench/out/B5",
       "checks": [
         "changes recorded",
@@ -183,7 +183,7 @@
     {
       "id": "B6",
       "group": "novel",
-      "prompt": "Add a footnote to paragraph 1 and a comment to paragraph 2.",
+      "prompt": "Create bench/out/B6/notes.odt with two paragraphs. Add a footnote to paragraph 1 and a comment to paragraph 2.",
       "output_dir": "bench/out/B6",
       "checks": [
         "one footnote",
@@ -193,7 +193,7 @@
     {
       "id": "B7",
       "group": "novel",
-      "prompt": "Create a document with three Heading 1 sections, insert a table of contents, and update the fields.",
+      "prompt": "Create bench/out/B7/toc.odt with three Heading 1 sections, insert a table of contents, and update the fields.",
       "output_dir": "bench/out/B7",
       "checks": [
         "TOC present",
@@ -204,7 +204,7 @@
     {
       "id": "B8",
       "group": "novel",
-      "prompt": "Create a Calc sheet with Category and Amount (10 rows), then build a pivot table summing Amount by Category.",
+      "prompt": "Create bench/out/B8/pivot.xlsx with Category and Amount (10 rows), then build a pivot table summing Amount by Category.",
       "output_dir": "bench/out/B8",
       "checks": [
         "pivot exists",
@@ -215,7 +215,7 @@
     {
       "id": "B9",
       "group": "novel",
-      "prompt": "Create a 3-slide presentation: title slide, bullets slide, closing slide. Save deck.pptx.",
+      "prompt": "Create a 3-slide presentation and save it as bench/out/B9/deck.pptx: title slide, bullets slide, closing slide.",
       "output_dir": "bench/out/B9",
       "checks": [
         "3 slides",
@@ -226,7 +226,7 @@
     {
       "id": "B10",
       "group": "novel",
-      "prompt": "Export a Writer document to PDF with a DRAFT watermark.",
+      "prompt": "Create bench/out/B10/draft.odt with a paragraph, then export bench/out/B10/draft.pdf with a DRAFT watermark.",
       "output_dir": "bench/out/B10",
       "checks": [
         "watermark visible in PDF"
@@ -235,7 +235,7 @@
     {
       "id": "B11",
       "group": "novel",
-      "prompt": "Create a document with a figure caption and a cross-reference (\"see figure 1\") that updates when the caption number changes.",
+      "prompt": "Create bench/out/B11/caption.odt with a figure caption and a cross-reference (\"see figure 1\") that updates when the caption number changes.",
       "output_dir": "bench/out/B11",
       "checks": [
         "caption present",
@@ -245,7 +245,7 @@
     {
       "id": "B12",
       "group": "novel",
-      "prompt": "Create a Calc sheet with dates in A and values in B, insert a chart, and make the X axis use a date axis instead of text categories.",
+      "prompt": "Create bench/out/B12/dates.xlsx with dates in A and values in B, insert a chart, and make the X axis use a date axis instead of text categories.",
       "output_dir": "bench/out/B12",
       "checks": [
         "axis uses dates",
