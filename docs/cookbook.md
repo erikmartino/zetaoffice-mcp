@@ -26,7 +26,7 @@ cookbook {topic:"embed"}                    # read the matching recipe
 document {action:"create", doc_type:"writer"}
 text     {action:"insert", content:"Title\nBody text\n"}
 text     {action:"style", style_name:"Title", paragraph_n:1}
-save     {action:"export", file_path:"/path/out.odt", export_format:"odt"}
+save     {action:"export", file_path:"out.odt", export_format:"odt"}
 ```
 
 For anything not listed here, read §2–§4 and use `describe` before guessing.
@@ -357,13 +357,13 @@ Creates a real embedded Math object. Verify with `formula {action:"list"}`.
 ### Picture
 
 ```
-picture {action:"insert", file_path:"/abs/path.png", width_cm:8, height_cm:5}
+picture {action:"insert", file_path:"picture.png", width_cm:8, height_cm:5}
 ```
 
 ### Save, export, show in the browser
 
 ```
-save {action:"export", file_path:"/path/out.docx", export_format:"docx"}
+save {action:"export", file_path:"out.docx", export_format:"docx"}
 document {action:"open_browser"}          # mirrors the current doc into a tab
 ```
 

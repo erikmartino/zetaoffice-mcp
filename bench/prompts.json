@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "preamble": "You have the zetaoffice MCP for LibreOffice. First call bridge {action:\"status\"} and cookbook. If either tool is missing, reply exactly STALE MCP and stop - do not work around it with shell or other tools. Otherwise: prefer the high-level tools (document, text, sheet, embed, save); use uno with describe only when the cookbook has no recipe; verify results by reading state back; report the file paths.",
+  "preamble": "You have the zetaoffice MCP for LibreOffice. Work from the repository root (change into the zetaoffice-mcp checkout first if needed); all paths are relative to it. First call bridge {action:\"status\"} and cookbook. If either tool is missing, reply exactly STALE MCP and stop - do not work around it with shell or other tools. Otherwise: prefer the high-level tools (document, text, sheet, embed, save); use uno with describe only when the cookbook has no recipe; verify results by reading state back; report the file paths.",
   "targets": {
     "cookbook": {
       "tool_calls": 8,
@@ -15,8 +15,8 @@
     {
       "id": "A1",
       "group": "cookbook",
-      "prompt": "Create /home/martino/Documents/bench/A1/letter.odt: title \"Notice of Inspection\", a date line, two body paragraphs. Export letter.pdf beside it.",
-      "output_dir": "/home/martino/Documents/bench/A1",
+      "prompt": "Create bench/out/A1/letter.odt: title \"Notice of Inspection\", a date line, two body paragraphs. Export letter.pdf beside it.",
+      "output_dir": "bench/out/A1",
       "checks": [
         "ODT > 5 KB",
         "PDF > 5 KB",
@@ -27,8 +27,8 @@
     {
       "id": "A2",
       "group": "cookbook",
-      "prompt": "Create /home/martino/Documents/bench/A2/weights.xlsx: columns Date, Weight (g) with 5 weekly rows (increasing weights), and a line chart with X = Date, Y = Weight (g).",
-      "output_dir": "/home/martino/Documents/bench/A2",
+      "prompt": "Create bench/out/A2/weights.xlsx: columns Date, Weight (g) with 5 weekly rows (increasing weights), and a line chart with X = Date, Y = Weight (g).",
+      "output_dir": "bench/out/A2",
       "checks": [
         "xlsx exists",
         "one chart",
@@ -39,8 +39,8 @@
     {
       "id": "A3",
       "group": "cookbook",
-      "prompt": "Create /home/martino/Documents/bench/A3/report.odt with a title, one paragraph, then an embedded Calc sheet (2 columns x 4 rows) below it. Save ODT and DOCX.",
-      "output_dir": "/home/martino/Documents/bench/A3",
+      "prompt": "Create bench/out/A3/report.odt with a title, one paragraph, then an embedded Calc sheet (2 columns x 4 rows) below it. Save ODT and DOCX.",
+      "output_dir": "bench/out/A3",
       "checks": [
         "ODT has Object 1/",
         "DOCX has word/embeddings/",
@@ -51,7 +51,7 @@
       "id": "A4",
       "group": "cookbook",
       "prompt": "Fill the embedded sheet in the open document with 6 rows and add a column chart; export report.pdf.",
-      "output_dir": "/home/martino/Documents/bench/A4",
+      "output_dir": "bench/out/A4",
       "checks": [
         "embedded sheet has 6 rows",
         "chart count 1",
@@ -62,7 +62,7 @@
       "id": "A5",
       "group": "cookbook",
       "prompt": "Insert x = {-b +- sqrt{b^2 - 4ac}} over 2a as a native Math object into a new Writer document; save formula.odt.",
-      "output_dir": "/home/martino/Documents/bench/A5",
+      "output_dir": "bench/out/A5",
       "checks": [
         "ODT has a Math object",
         "formula text present"
@@ -72,7 +72,7 @@
       "id": "A6",
       "group": "cookbook",
       "prompt": "Create a Calc sheet with a header row, freeze it, bold it, set column widths, and export table.xlsx.",
-      "output_dir": "/home/martino/Documents/bench/A6",
+      "output_dir": "bench/out/A6",
       "checks": [
         "freeze pane row 1",
         "bold header",
@@ -84,7 +84,7 @@
       "id": "A7",
       "group": "cookbook",
       "prompt": "Use describe to list the methods of com.sun.star.text.XText and report the signature of insertString.",
-      "output_dir": "/home/martino/Documents/bench/A7",
+      "output_dir": "bench/out/A7",
       "checks": [
         "all params with types and modes",
         "correct return type"
@@ -94,7 +94,7 @@
       "id": "A8",
       "group": "cookbook",
       "prompt": "Export the current document as DOCX and PDF and open it in the browser.",
-      "output_dir": "/home/martino/Documents/bench/A8",
+      "output_dir": "bench/out/A8",
       "checks": [
         "both files exist",
         "browser tab shows the document"
@@ -104,7 +104,7 @@
       "id": "A9",
       "group": "cookbook",
       "prompt": "Restart the bridge cleanly and confirm it is healthy.",
-      "output_dir": "/home/martino/Documents/bench/A9",
+      "output_dir": "bench/out/A9",
       "checks": [
         "health green",
         "one Wasm runtime",
@@ -114,8 +114,8 @@
     {
       "id": "A10",
       "group": "cookbook",
-      "prompt": "Create /home/martino/Documents/bench/A10/note.odt with a heading and a paragraph, then insert a local PNG as a picture below it. Save ODT.",
-      "output_dir": "/home/martino/Documents/bench/A10",
+      "prompt": "Create bench/out/A10/note.odt with a heading and a paragraph, then insert a local PNG as a picture below it. Save ODT.",
+      "output_dir": "bench/out/A10",
       "checks": [
         "picture count 1",
         "image embedded",
@@ -126,7 +126,7 @@
       "id": "B1",
       "group": "novel",
       "prompt": "Create a Writer document with a 5x3 table (Item, Qty, Price), fill 4 rows, and a total row whose Price cell sums the column. Export ODT.",
-      "output_dir": "/home/martino/Documents/bench/B1",
+      "output_dir": "bench/out/B1",
       "checks": [
         "native table",
         "5 rows",
@@ -137,7 +137,7 @@
       "id": "B2",
       "group": "novel",
       "prompt": "Create a Writer document with A4 landscape, 1.5 cm margins, a \"Confidential\" header and a footer with page numbers. Export PDF.",
-      "output_dir": "/home/martino/Documents/bench/B2",
+      "output_dir": "bench/out/B2",
       "checks": [
         "page setup applied",
         "header visible",
@@ -148,7 +148,7 @@
       "id": "B3",
       "group": "novel",
       "prompt": "Create a Calc sheet titled Budget (merged A1:C1), amounts in C formatted as currency, and a conditional format that highlights Qty > 10.",
-      "output_dir": "/home/martino/Documents/bench/B3",
+      "output_dir": "bench/out/B3",
       "checks": [
         "merged range",
         "currency format",
@@ -159,7 +159,7 @@
       "id": "B4",
       "group": "novel",
       "prompt": "Add a bookmark named intro to paragraph 2 and a hyperlink from paragraph 1 that jumps to it, plus an external https:// link.",
-      "output_dir": "/home/martino/Documents/bench/B4",
+      "output_dir": "bench/out/B4",
       "checks": [
         "bookmark exists",
         "internal link #intro",
@@ -170,7 +170,7 @@
       "id": "B5",
       "group": "novel",
       "prompt": "Enable track changes, edit one sentence, list the pending changes, then accept them all.",
-      "output_dir": "/home/martino/Documents/bench/B5",
+      "output_dir": "bench/out/B5",
       "checks": [
         "changes recorded",
         "zero pending after accept",
@@ -181,7 +181,7 @@
       "id": "B6",
       "group": "novel",
       "prompt": "Add a footnote to paragraph 1 and a comment to paragraph 2.",
-      "output_dir": "/home/martino/Documents/bench/B6",
+      "output_dir": "bench/out/B6",
       "checks": [
         "one footnote",
         "one comment anchored to p2"
@@ -191,7 +191,7 @@
       "id": "B7",
       "group": "novel",
       "prompt": "Create a document with three Heading 1 sections, insert a table of contents, and update the fields.",
-      "output_dir": "/home/martino/Documents/bench/B7",
+      "output_dir": "bench/out/B7",
       "checks": [
         "TOC present",
         "3 entries",
@@ -202,7 +202,7 @@
       "id": "B8",
       "group": "novel",
       "prompt": "Create a Calc sheet with Category and Amount (10 rows), then build a pivot table summing Amount by Category.",
-      "output_dir": "/home/martino/Documents/bench/B8",
+      "output_dir": "bench/out/B8",
       "checks": [
         "pivot exists",
         "sums correct",
@@ -213,7 +213,7 @@
       "id": "B9",
       "group": "novel",
       "prompt": "Create a 3-slide presentation: title slide, bullets slide, closing slide. Save deck.pptx.",
-      "output_dir": "/home/martino/Documents/bench/B9",
+      "output_dir": "bench/out/B9",
       "checks": [
         "3 slides",
         "title and bullets text",
@@ -224,7 +224,7 @@
       "id": "B10",
       "group": "novel",
       "prompt": "Export a Writer document to PDF with a DRAFT watermark.",
-      "output_dir": "/home/martino/Documents/bench/B10",
+      "output_dir": "bench/out/B10",
       "checks": [
         "watermark visible in PDF"
       ]
@@ -233,7 +233,7 @@
       "id": "B11",
       "group": "novel",
       "prompt": "Create a document with a figure caption and a cross-reference (\"see figure 1\") that updates when the caption number changes.",
-      "output_dir": "/home/martino/Documents/bench/B11",
+      "output_dir": "bench/out/B11",
       "checks": [
         "caption present",
         "REF field resolves"
@@ -243,7 +243,7 @@
       "id": "B12",
       "group": "novel",
       "prompt": "Create a Calc sheet with dates in A and values in B, insert a chart, and make the X axis use a date axis instead of text categories.",
-      "output_dir": "/home/martino/Documents/bench/B12",
+      "output_dir": "bench/out/B12",
       "checks": [
         "axis uses dates",
         "labels formatted as dates"

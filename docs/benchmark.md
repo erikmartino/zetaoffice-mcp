@@ -25,7 +25,7 @@ Checklist before each run:
    ```
    node scripts/bench.mjs reset <id>
    ```
-   This deletes `/home/martino/Documents/bench/<id>/`, restarts the bridge
+   This deletes `bench/out/<id>/`, restarts the bridge
    (fresh Wasm runtime, blank headless document) and waits until it is healthy.
 3. **Give the agent only the prompt** plus, in the guided variant, the preamble
    below. Never show it this file, the acceptance checks, or the cookbook.
@@ -38,6 +38,9 @@ Checklist before each run:
    cold variant).
 
 ## How to run
+
+Run the agent **from the repository root** (the `zetaoffice-mcp` checkout);
+all paths below are relative to it.
 
 1. Reset as above.
 2. Start the timer when the prompt is delivered, stop when every check passes.
@@ -116,16 +119,16 @@ A run is only valid if the environment and the grading are fixed.
 
 | ID | Prompt | Acceptance checks |
 | --- | --- | --- |
-| A1 | Create `/home/martino/Documents/bench/A1/letter.odt`: title "Notice of Inspection", a date line, two body paragraphs. Export `letter.pdf` beside it. | ODT > 5 KB; PDF > 5 KB; first paragraph style is `Title`; text contains the date line |
-| A2 | Create `/home/martino/Documents/bench/A2/weights.xlsx`: columns `Date`, `Weight (g)` with 5 weekly rows (increasing weights), and a line chart with X = Date, Y = Weight (g). | xlsx exists; one chart in the package; header row bold; values match |
-| A3 | Create `/home/martino/Documents/bench/A3/report.odt` with a title, one paragraph, then an embedded Calc sheet (2 columns × 4 rows) below it. Save ODT and DOCX. | ODT contains `Object 1/`; DOCX contains `word/embeddings/`; object count is 1 |
+| A1 | Create `bench/out/A1/letter.odt`: title "Notice of Inspection", a date line, two body paragraphs. Export `letter.pdf` beside it. | ODT > 5 KB; PDF > 5 KB; first paragraph style is `Title`; text contains the date line |
+| A2 | Create `bench/out/A2/weights.xlsx`: columns `Date`, `Weight (g)` with 5 weekly rows (increasing weights), and a line chart with X = Date, Y = Weight (g). | xlsx exists; one chart in the package; header row bold; values match |
+| A3 | Create `bench/out/A3/report.odt` with a title, one paragraph, then an embedded Calc sheet (2 columns × 4 rows) below it. Save ODT and DOCX. | ODT contains `Object 1/`; DOCX contains `word/embeddings/`; object count is 1 |
 | A4 | Fill the embedded sheet in the open document with 6 rows and add a column chart; export `report.pdf`. | embedded sheet has 6 rows; chart count 1; PDF exists |
 | A5 | Insert `x = {-b +- sqrt{b^2 - 4ac}} over 2a` as a native Math object into a new Writer document; save `formula.odt`. | ODT contains a Math object (`Object 1`); formula text present |
 | A6 | Create a Calc sheet with a header row, freeze it, bold it, set column widths, and export `table.xlsx`. | freeze pane on row 1; bold header; widths set; xlsx exists |
 | A7 | Use `describe` to list the methods of `com.sun.star.text.XText` and report the signature of `insertString`. | answer names all params with types/modes; no document needed |
 | A8 | Export the current document as DOCX and PDF and open it in the browser. | both files exist; a browser tab shows the document |
 | A9 | Restart the bridge cleanly and confirm it is healthy. | health green after restart; one Wasm runtime; no orphan processes |
-| A10 | Create `/home/martino/Documents/bench/A10/note.odt` with a heading and a paragraph, then insert a local PNG as a picture below it. Save ODT. | picture count 1; image bytes embedded; ODT exists |
+| A10 | Create `bench/out/A10/note.odt` with a heading and a paragraph, then insert a local PNG as a picture below it. Save ODT. | picture count 1; image bytes embedded; ODT exists |
 
 ## B — not covered by the cookbook
 
