@@ -54,10 +54,13 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
     supplier/control `setVisualAreaSize` path.
 14. **Track changes has no high-level support.** Set `RecordChanges` on the
     model; accept with `DispatchHelper.executeDispatch(".uno:AcceptAllTrackedChanges")`.
-15. **Conditional formatting is a known engine gap.** The range-level
+15. **Cross-reference fields are a known engine gap.** `GetReference` enum
+    properties cannot be set, so real sequence references do not export. A
+    variable pair updates text but is not a sequence-ref; note the limitation.
+16. **Conditional formatting is a known engine gap.** The range-level
     `ConditionalFormat` entries are not serialized to ODS/XLSX in this build.
     Do not spend calls on it; note the limitation.
-16. **Verify with tool reads, not artifacts.** Read state back
+17. **Verify with tool reads, not artifacts.** Read state back
     (`structure`, `sheet read`, `embed` counts). Do not unzip packages, run
     `pdftoppm`, or inspect screenshots to find out what happened.
 
