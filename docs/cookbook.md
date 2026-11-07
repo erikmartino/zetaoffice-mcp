@@ -662,7 +662,10 @@ verification.
 
 A caption number is a `SetExpression` **sequence** field; the cross-reference
 is a `GetReference` field. Use `set_enum` for the numeric/enum properties: a
-typed `set` can silently leave them at 0 in this build.
+typed `set` can silently leave them at 0 in this build. That includes the
+reference's `SequenceNumber` (a SHORT): it must point at the caption's number
+(from `SequenceValue`) or the field stays at 0 and renders
+`Error: Reference source not found`.
 
 ```js
 const U = (o) => tools.zetaoffice.uno(o);
@@ -696,6 +699,7 @@ const ref = (await U({ op: "call", h, name: "createInstance",
 await U({ op: "set_enum", h: ref, name: "ReferenceFieldSource", value: 1 }); // SEQUENCE_FIELD
 await U({ op: "set", h: ref, name: "SourceName", value: "Figure" });
 await U({ op: "set_enum", h: ref, name: "ReferenceFieldPart", value: 7 });   // ONLY_SEQUENCE_NUMBER
+await U({ op: "set_enum", h: ref, name: "SequenceNumber", value: 1 });       // target caption number
 await U({ op: "call", h: text, name: "insertTextContent",
   args: [{ $h: cur }, { $h: ref }, false] });
 
@@ -707,8 +711,14 @@ const dp = (await U({ op: "query", h: frame, iface: "com.sun.star.frame.XDispatc
 await U({ op: "call", h: helper, name: "executeDispatch",
   args: [{ $h: dp }, ".uno:UpdateFields", "_self", 0, []] });
 
+const refShown = (await U({ op: "call", h: ref, name: "getPresentation", args: [false] })).value; // "1"
 await tools.zetaoffice.save({ action: "export", file_path: "out/caption.odt", export_format: "odt" });
 ```
+
+`refShown === "1"` is the verification; without the `SequenceNumber` call it
+stays `Error: Reference source not found`. The reference is live: refreshing
+fields re-expands the stored sequence number, so plain typed text is not a
+substitute.
 
 Enum values used: `SetVariableType.SEQUENCE=1`, `NumberingType.ARABIC=4`,
 `ReferenceFieldSource.SEQUENCE_FIELD=1`, `ReferenceFieldPart.ONLY_SEQUENCE_NUMBER=7`
