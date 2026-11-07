@@ -613,7 +613,15 @@ float -> {"$f": 1.5}, sequence -> [...], null -> null.
 
 Typical start: root, get "ServiceManager", call createInstanceWithContext
 ["com.sun.star.frame.Desktop", root], call getCurrentComponent [].
-Use describe first rather than guessing method names or argument counts.`,
+Use describe first rather than guessing method names or argument counts.
+Describe a module (e.g. "com.sun.star.sheet") to list its interfaces and
+services, then describe one of those for methods, parameter types/modes and
+return types.
+
+Docs: https://api.libreoffice.org/docs/idl/ref/ (per-type pages) and
+https://raw.githubusercontent.com/LibreOffice/core/master/offapi/com/sun/star/
+<module>/<Type>.idl (raw IDL). The Wasm build can differ from the docs, so
+describe is authoritative.`,
   {
     op: z.enum(["root", "get", "set", "call", "query", "create", "describe", "release"])
       .describe("Operation to perform"),

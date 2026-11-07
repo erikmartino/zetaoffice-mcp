@@ -38,9 +38,11 @@ Response: `{"id": <int>, "ok": true,  "v": <value>}`
 `describe` returns, for an interface name: `type`, `kind`, `superclasses`,
 `methods[]` (`name`, `returns`, `params[]` with `name`/`type`/`mode`) and
 `attributes[]`. With a handle it returns the object's `interfaces` and
-`services`. Use it instead of guessing method names or argument counts — e.g.
-the chart call in this build wants five arguments, and axis captions come from
-`getAxisTitle()`, not a property.
+`services`. A module name (e.g. `com.sun.star.sheet`) lists that module's
+interfaces and services from the bundled index (`public/uno-index.js`,
+regenerate with `node scripts/gen-uno-index.mjs`). Use it instead of guessing
+method names or argument counts — e.g. the chart call in this build wants five
+arguments, and axis captions come from `getAxisTitle()`, not a property.
 
 Everything else — `createInstance`, `loadComponentFromURL`, `storeToURL`,
 `getDrawPages`, `setPosition`, setting `FillColor`, … — is just `get`/`set`/

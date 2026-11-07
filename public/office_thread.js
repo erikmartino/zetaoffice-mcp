@@ -4,6 +4,10 @@
 // Implements the exact tool actions corresponding to mcp-libre's 9 consolidated tools.
 
 import { ZetaHelperThread } from './zetajs/zetaHelper.js';
+import { UNO_INDEX } from './uno-index.js';
+
+// Where the agent can read full IDL documentation for a type.
+const UNO_DOCS_URL = 'https://api.libreoffice.org/docs/idl/ref/';
 
 const zHT = new ZetaHelperThread();
 const zetajs = zHT.zetajs;
@@ -812,9 +816,26 @@ function unoDescribe(req) {
   }
 
   if (!req.type) throw new Error("describe needs 'type' (an interface/service name) or 'h' (a handle)");
+
+  // Modules are not part of the Wasm build's type registry; answer them from
+  // the generated index so an agent can discover names without the docs.
+  if (UNO_INDEX[req.type]) {
+    const entry = UNO_INDEX[req.type];
+    return {
+      type: req.type,
+      kind: 'MODULE',
+      interfaces: entry.interfaces,
+      services: entry.services,
+      hint: 'Describe an entry for methods, parameter types/modes and return types.',
+    };
+  }
+
   const cls = reflection.forName(req.type);
   if (!cls) {
-    throw new Error(`Unknown type '${req.type}'. Use an interface name such as com.sun.star.sheet.XSpreadsheet.`);
+    throw new Error(
+      `Unknown type '${req.type}'. Pass an interface (e.g. com.sun.star.sheet.XSpreadsheet) ` +
+      `or a module (e.g. com.sun.star.sheet). Docs: ${UNO_DOCS_URL}`
+    );
   }
   const info = unoTypeInfo(cls);
   const out = {
