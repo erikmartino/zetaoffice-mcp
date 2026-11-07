@@ -95,26 +95,28 @@ LibreOffice may lose complex layout such as n-ary limits.
 
 ## 🚀 Quick Start
 
-Requirements: **Node.js 20+** and **pnpm** (plus ~250 MB of disk for the ZetaOffice WASM bundle). No Python, no browser and no LibreOffice installation are needed.
+Requirements: **Node.js 20+** and network access on the first run. No Python, no browser and no LibreOffice installation are needed.
 
 ```bash
 git clone https://github.com/erikmartino/zetaoffice-mcp.git
 cd zetaoffice-mcp
 
-# 1. Install dependencies
-CI=true pnpm install
-
-# 2. Download and patch the ZetaOffice WASM bundle (one time, ~250 MB)
-node lowa/prepare-cdn.mjs
-
-# 3. Run the bridge headless (no browser, no Chrome)
-node server.mjs --node
+# Start the MCP server (stdio).
+# First run installs the Node dependencies and downloads the ~250 MB
+# ZetaOffice WASM bundle, then the server is ready.
+node start.mjs
 ```
 
-The API is then at `http://localhost:8765` (`/health`, `/tools/<name>`).
+That is the whole install: no build step and no manual dependency or bundle
+setup. The same preparation runs automatically if you start the HTTP bridge
+directly:
 
-For the interactive canvas instead, run `node server.mjs --browser` and open
-`http://localhost:8765`. The legacy headless-Chrome mode is available with
+```bash
+node server.mjs --node     # API at http://localhost:8765
+```
+
+For the interactive canvas, use `node server.mjs --browser` and open
+`http://localhost:8765`. The legacy headless-Chrome mode is
 `node server.mjs --headless`.
 
 ---
@@ -129,10 +131,10 @@ Add the server directly from the command line:
 
 ```bash
 # Headless Mode (default):
-claude mcp add zetaoffice -- node $(pwd)/mcp_stdio_server.mjs
+claude mcp add zetaoffice -- node $(pwd)/start.mjs
 
 # Or Interactive Browser Mode:
-claude mcp add zetaoffice -e HEADLESS=false -- node $(pwd)/mcp_stdio_server.mjs
+claude mcp add zetaoffice -e HEADLESS=false -- node $(pwd)/start.mjs
 ```
 
 ### 2. Antigravity / Gemini CLI (`agy`)
@@ -144,7 +146,7 @@ Add via `/mcp` in chat or configure in `~/.gemini/config/mcp_config.json`:
   "mcpServers": {
     "zetaoffice": {
       "command": "node",
-      "args": ["/absolute/path/to/zetaoffice-mcp/mcp_stdio_server.mjs"],
+      "args": ["/absolute/path/to/zetaoffice-mcp/start.mjs"],
       "env": {
         "HEADLESS": "true"
       }
@@ -162,7 +164,7 @@ Add to `claude_desktop_config.json` or `cursor_settings.json`:
   "mcpServers": {
     "zetaoffice": {
       "command": "node",
-      "args": ["/absolute/path/to/zetaoffice-mcp/mcp_stdio_server.mjs"],
+      "args": ["/absolute/path/to/zetaoffice-mcp/start.mjs"],
       "env": {
         "HEADLESS": "true"
       }
@@ -209,7 +211,8 @@ Even if started in headless mode, you can control the browser directly from your
 
 ## 🧪 Testing the Bridge
 
-Start the bridge, then run the Node smoke test:
+Start the HTTP bridge (`node server.mjs --node`), then run the Node smoke test.
+The MCP entry point itself is `node start.mjs`:
 
 ```bash
 node test_client.mjs

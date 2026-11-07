@@ -27,10 +27,13 @@ else
     exit 1
 fi
 
-# 3. Ensure scripts are executable
+# 3. Fetch the ZetaOffice WASM bundle (no-op when already present)
+node lowa/prepare-cdn.mjs
+
+# 4. Ensure scripts are executable
 chmod +x server.mjs mcp_stdio_server.mjs test_client.mjs
 
-# 4. Verify runtime assets
+# 5. Verify runtime assets
 if [ ! -f "public/zetajs/zeta.js" ] || [ ! -f "public/office_thread.js" ]; then
     echo "❌ Missing required WebAssembly / ZetaJS runtime assets in public/"
     exit 1

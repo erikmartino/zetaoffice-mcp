@@ -3,7 +3,7 @@ import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn, execSync } from 'node:child_process';
+import { spawn, spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
@@ -237,9 +237,26 @@ function stopHeadless() {
   cleanupHeadlessTmpDir();
 }
 
+// Fetch the ZetaOffice WASM bundle on first run (no manual prepare step).
+function ensureNodeBundle() {
+  const soffice = path.join(__dirname, 'lowa', 'cdn', 'soffice.js');
+  if (fs.existsSync(soffice)) return true;
+  console.log('[Node] WASM bundle missing; downloading it (first run, ~250 MB)...');
+  const r = spawnSync(process.execPath, [path.join(__dirname, 'lowa', 'prepare-cdn.mjs')], {
+    stdio: 'inherit',
+    env: { ...process.env },
+  });
+  if (r.status !== 0) {
+    console.error('[Node] Could not prepare the WASM bundle. Check your network connection and retry.');
+    return false;
+  }
+  return true;
+}
+
 // Spawn the Wasm runtime directly under Node.js (no browser at all).
 function spawnNodeRuntime(url) {
   if (headlessProcess) return headlessProcess;
+  if (!ensureNodeBundle()) return null;
 
   const runtime = path.join(__dirname, 'lowa', 'node-runtime.mjs');
   if (!fs.existsSync(runtime)) {

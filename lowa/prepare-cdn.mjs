@@ -50,6 +50,10 @@ const jsPath = path.join(CDN, 'soffice.js');
 let src = fs.readFileSync(jsPath, 'utf8');
 
 function patch(label, from, to, { firstOnly = false } = {}) {
+  if (src.includes(to)) {
+    console.log(`[patch] ${label} (already applied)`);
+    return;
+  }
   const count = src.split(from).length - 1;
   if (count === 0 || (!firstOnly && count !== 1)) {
     throw new Error(`[patch] ${label}: expected ${firstOnly ? '>=1' : '1'} match, found ${count}`);

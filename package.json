@@ -8,7 +8,7 @@
     "start": "node server.mjs",
     "start:headless": "node server.mjs --headless",
     "start:browser": "node server.mjs --browser",
-    "mcp": "node mcp_stdio_server.mjs",
+    "mcp": "node start.mjs",
     "mcp:browser": "HEADLESS=false node mcp_stdio_server.mjs",
     "start:node": "node server.mjs --node",
     "test": "node test_client.mjs"
