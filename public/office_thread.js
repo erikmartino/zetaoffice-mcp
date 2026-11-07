@@ -744,10 +744,167 @@ function unoSetMember(obj, name, raw) {
   obj[name] = unoDecode(raw);
 }
 
+// UNO enum values do not stringify in this binding; compare them by identity.
+function unoTypeClassName(tc) {
+  try {
+    const TC = Module.uno.com.sun.star.uno.TypeClass;
+    const names = ['VOID', 'BOOLEAN', 'BYTE', 'SHORT', 'UNSIGNED_SHORT', 'LONG',
+      'UNSIGNED_LONG', 'HYPER', 'UNSIGNED_HYPER', 'FLOAT', 'DOUBLE', 'CHAR',
+      'STRING', 'TYPE', 'ANY', 'INTERFACE', 'STRUCT', 'ENUM', 'EXCEPTION',
+      'SEQUENCE', 'ARRAY', 'TYPECLASS'];
+    for (const name of names) {
+      if (tc === TC[name]) return name;
+    }
+  } catch (e) { /* fall through */ }
+  return undefined;
+}
+
+function unoParamModeName(mode) {
+  try {
+    const PM = Module.uno.com.sun.star.reflection.ParamMode;
+    if (mode === PM.IN) return 'IN';
+    if (mode === PM.OUT) return 'OUT';
+    if (mode === PM.INOUT) return 'INOUT';
+  } catch (e) { /* fall through */ }
+  return undefined;
+}
+
+function unoTypeInfo(cls) {
+  if (!cls) return null;
+  try {
+    const name = cls.getName();
+    let kind;
+    try { kind = unoTypeClassName(cls.getTypeClass()); } catch (e) { kind = undefined; }
+    return { type: name, kind };
+  } catch (e) {
+    try { return { type: String(cls) }; } catch (e2) { return null; }
+  }
+}
+
+// Reflection: describe an interface/service by name, or the interfaces of a
+// live object. Backed by com.sun.star.reflection.CoreReflection, so the answer
+// always matches the running Wasm build.
+function unoDescribe(req) {
+  const sm = zHT.context.getServiceManager();
+  const reflection = sm.createInstanceWithContext('com.sun.star.reflection.CoreReflection', zHT.context);
+
+  if (req.h) {
+    const obj = unoGetHandle(req.h);
+    const out = { interfaces: [] };
+    try {
+      const tp = queryInterface(obj, 'com.sun.star.lang.XTypeProvider');
+      if (tp) {
+        const types = tp.getTypes();
+        for (let i = 0; i < types.length; i++) {
+          const ti = unoTypeInfo(types[i]);
+          if (ti && ti.type) out.interfaces.push(ti.type);
+        }
+      }
+    } catch (e) { out.error = e.message; }
+    try {
+      const si = queryInterface(obj, 'com.sun.star.lang.XServiceInfo');
+      if (si) {
+        out.services = si.getSupportedServiceNames();
+        out.implementation = si.getImplementationName();
+      }
+    } catch (e) { /* optional interface */ }
+    return out;
+  }
+
+  if (!req.type) throw new Error("describe needs 'type' (an interface/service name) or 'h' (a handle)");
+  const cls = reflection.forName(req.type);
+  if (!cls) {
+    throw new Error(`Unknown type '${req.type}'. Use an interface name such as com.sun.star.sheet.XSpreadsheet.`);
+  }
+  const info = unoTypeInfo(cls);
+  const out = {
+    type: req.type,
+    kind: info ? info.kind : undefined,
+    superclasses: [],
+    interfaces: [],
+    methods: [],
+    attributes: [],
+  };
+  try {
+    const sups = cls.getSuperclasses();
+    for (let i = 0; i < sups.length; i++) {
+      const si = unoTypeInfo(sups[i]);
+      if (si && si.type) out.superclasses.push(si.type);
+    }
+  } catch (e) { /* optional */ }
+  try {
+    const ifaces = cls.getInterfaces();
+    for (let i = 0; i < ifaces.length; i++) {
+      const ii = unoTypeInfo(ifaces[i]);
+      if (ii && ii.type) out.interfaces.push(ii.type);
+    }
+  } catch (e) { out.interfacesError = e.message; }
+
+  try {
+    const methods = cls.getMethods();
+    for (let i = 0; i < methods.length; i++) {
+      const m = methods[i];
+      const name = m.getName();
+      if (req.method && name !== req.method) continue;
+      const entry = { name };
+      try { entry.returns = unoTypeInfo(m.getReturnType()); } catch (e) { /* optional */ }
+      entry.params = [];
+      try {
+        const infos = m.getParameterInfos();
+        for (let p = 0; p < infos.length; p++) {
+          entry.params.push({
+            name: infos[p].aName,
+            type: unoTypeInfo(infos[p].aType),
+            mode: unoParamModeName(infos[p].aMode),
+          });
+        }
+      } catch (e) {
+        // Fallback for builds that only expose types and modes separately.
+        try {
+          const pts = m.getParameterTypes();
+          const modes = m.getParameterModes();
+          for (let p = 0; p < pts.length; p++) {
+            entry.params.push({ type: unoTypeInfo(pts[p]), mode: unoParamModeName(modes[p]) });
+          }
+        } catch (e2) { delete entry.params; }
+      }
+      out.methods.push(entry);
+    }
+  } catch (e) {
+    if (/no methods/i.test(e.message || '')) {
+      out.hint = 'Services have no methods - describe one of their interfaces instead (e.g. com.sun.star.sheet.XSpreadsheet).';
+    } else {
+      out.methodsError = e.message;
+    }
+  }
+
+  try {
+    const attrs = cls.getAttributes();
+    for (let i = 0; i < attrs.length; i++) {
+      const a = attrs[i];
+      const entry = { name: a.getName() };
+      try { entry.type = unoTypeInfo(a.getType()); } catch (e) { /* optional */ }
+      try { entry.readOnly = !!a.isReadOnly(); } catch (e) { /* optional */ }
+      out.attributes.push(entry);
+    }
+  } catch (e) { /* structs/enums have no attributes */ }
+
+  return out;
+}
+
 function unoDispatch(req) {
   switch (req.op) {
     case 'root':
       return { $h: unoPut(zHT.context) };
+    case 'create': {
+      if (!req.service) throw new Error("create needs 'service'");
+      const sm = zHT.context.getServiceManager();
+      const obj = sm.createInstanceWithContext(req.service, zHT.context);
+      return obj ? { $h: unoPut(obj) } : null;
+    }
+    case 'describe':
+      return unoDescribe(req);
+
     case 'get': {
       return unoEncode(unoGetMember(unoGetHandle(req.h), req.name));
     }
@@ -1651,6 +1808,13 @@ zHT.thrPort.onmessage = (event) => {
           chart: name,
           data_range: params.data_range,
         };
+        break;
+      }
+
+      case 'uno_live': {
+        // Generic UNO escape hatch: one tool for the whole com.sun.star API.
+        const value = unoDispatch(params);
+        result = { success: true, op: params.op, value };
         break;
       }
 

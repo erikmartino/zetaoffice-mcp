@@ -590,6 +590,50 @@ doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
 );
 
 // =============================================================================
+// GENERIC TOOL: uno (any interface, no dedicated tool required)
+// =============================================================================
+server.tool(
+  "uno",
+  `Generic UNO access to the active LibreOffice document: drive any
+com.sun.star interface without needing a dedicated tool.
+
+- root: handle to the UNO component context.
+- get(h, name): attribute, getX() accessor or property value.
+- set(h, name, value): attribute or property.
+- call(h, name, args): invoke a method.
+- query(h, iface): queryInterface -> handle or null.
+- create(service): createInstanceWithContext (no handle needed).
+- describe(type?, h?, method?): reflection metadata for an interface/service,
+  or the interfaces/services of a live object.
+- release(h): drop a handle.
+
+Value encoding (same as PROTOCOL.md): interface -> {"$h": n}, struct ->
+{"$s": "com.sun.star.awt.Point", X: 1, Y: 2}, enum -> {"$e": "...", v: "SOLID"},
+float -> {"$f": 1.5}, sequence -> [...], null -> null.
+
+Typical start: root, get "ServiceManager", call createInstanceWithContext
+["com.sun.star.frame.Desktop", root], call getCurrentComponent [].
+Use describe first rather than guessing method names or argument counts.`,
+  {
+    op: z.enum(["root", "get", "set", "call", "query", "create", "describe", "release"])
+      .describe("Operation to perform"),
+    h: z.number().int().optional().describe("Object handle (from a previous result)"),
+    name: z.string().optional().describe("Member or method name (for 'get', 'set', 'call')"),
+    iface: z.string().optional().describe("Interface name (for 'query')"),
+    service: z.string().optional().describe("Service name (for 'create')"),
+    type: z.string().optional().describe("Interface or service name (for 'describe')"),
+    method: z.string().optional().describe("Only describe this method (for 'describe')"),
+    args: z.array(z.any()).optional().describe("Method arguments (for 'call')"),
+    value: z.any().optional().describe("Value to assign (for 'set')")
+  },
+  async ({ op, h, name, iface, service, type, method, args, value }) => {
+    const payload = { op, h, name, iface, service, type, method, args, v: value };
+    for (const key of Object.keys(payload)) if (payload[key] === undefined) delete payload[key];
+    return jsonResponse(await callLibreoffice("/tools/uno_live", "POST", payload));
+  }
+);
+
+// =============================================================================
 // CONSOLIDATED TOOL 5: search
 // Actions: find, replace, replace_all
 // =============================================================================

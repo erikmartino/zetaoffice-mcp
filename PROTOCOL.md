@@ -30,8 +30,17 @@ Response: `{"id": <int>, "ok": true,  "v": <value>}`
 | `call` | `h`, `name`, `args` | method result |
 | `query` | `h`, `iface` | `{$h}` or `null` (`queryInterface`) |
 | `release` | `h` | `null` (drops the server-side handle) |
+| `create` | `service` | `{$h}` or `null` (`createInstanceWithContext`) |
+| `describe` | `type` or `h`, `method?` | reflection metadata (see below) |
 | `readFile` | `path` | `{data: <base64>, bytes}` (Wasm FS) |
 | `writeFile` | `path`, `data` (base64) | `{path, bytes}` (Wasm FS) |
+
+`describe` returns, for an interface name: `type`, `kind`, `superclasses`,
+`methods[]` (`name`, `returns`, `params[]` with `name`/`type`/`mode`) and
+`attributes[]`. With a handle it returns the object's `interfaces` and
+`services`. Use it instead of guessing method names or argument counts — e.g.
+the chart call in this build wants five arguments, and axis captions come from
+`getAxisTitle()`, not a property.
 
 Everything else — `createInstance`, `loadComponentFromURL`, `storeToURL`,
 `getDrawPages`, `setPosition`, setting `FillColor`, … — is just `get`/`set`/
@@ -91,4 +100,6 @@ left to the client.
 ## Clients
 
 - **Any language:** implement the ops above directly.
-- **MCP clients:** the same worker is reachable via `mcp_stdio_server.mjs`.
+- **MCP clients:** the same worker is reachable via `mcp_stdio_server.mjs`;
+  the `uno` tool mirrors these ops (`root`, `get`, `set`, `call`, `query`,
+  `create`, `describe`, `release`), so no per-feature tool is needed.
