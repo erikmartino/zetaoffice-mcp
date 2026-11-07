@@ -495,6 +495,50 @@ await tools.zetaoffice.save({ action: "export",
 `sheet {action:"chart"}` works on the active Calc document and turns the first
 column into category labels. No UNO is needed for the basic line chart.
 
+### Landscape, margins, header and page-number footer (B2 fast path)
+
+Page setup is a page **style** property set; header/footer are XText objects on
+that style. Use `value:` (not `v:`) for these properties.
+
+```js
+const U = (o) => tools.zetaoffice.uno(o);
+const doc = await tools.zetaoffice.document({ action: "create", doc_type: "writer" });
+const h = doc.handle.$h;
+const fams = (await U({ op: "call", h, name: "getStyleFamilies" })).value.$h;
+const pages = (await U({ op: "call", h: fams, name: "getByName", args: ["PageStyles"] })).value.$h;
+const style = (await U({ op: "call", h: pages, name: "getByName", args: ["Standard"] })).value.$h;
+
+for (const [name, value] of [
+  ["IsLandscape", true], ["Width", 29700], ["Height", 21000],
+  ["LeftMargin", 1500], ["RightMargin", 1500], ["TopMargin", 1500], ["BottomMargin", 1500],
+  ["HeaderIsOn", true], ["FooterIsOn", true],
+]) await U({ op: "set", h: style, name, value });
+
+const ht = (await U({ op: "call", h: style, name: "getPropertyValue", args: ["HeaderText"] })).value.$h;
+const hc = (await U({ op: "call", h: ht, name: "createTextCursor" })).value.$h;
+await U({ op: "call", h: ht, name: "insertString", args: [{ $h: hc }, "Confidential", false] });
+await U({ op: "set", h: hc, name: "ParaAdjust", value: { $e: "com.sun.star.style.ParagraphAdjust", v: "CENTER" } });
+await U({ op: "set", h: hc, name: "CharWeight", value: { $f: 150 } });
+
+const ft = (await U({ op: "call", h: style, name: "getPropertyValue", args: ["FooterText"] })).value.$h;
+const fc = (await U({ op: "call", h: ft, name: "createTextCursor" })).value.$h;
+await U({ op: "call", h: ft, name: "insertString", args: [{ $h: fc }, "Page ", false] });
+const field = (await U({ op: "call", h, name: "createInstance", args: ["com.sun.star.text.TextField.PageNumber"] })).value.$h;
+await U({ op: "set", h: field, name: "NumberingType", value: 4 });
+await U({ op: "call", h: ft, name: "insertTextContent", args: [{ $h: fc }, { $h: field }, false] });
+await U({ op: "set", h: fc, name: "ParaAdjust", value: { $e: "com.sun.star.style.ParagraphAdjust", v: "CENTER" } });
+
+await tools.zetaoffice.text({ action: "insert", content: "Benchmark Report\nBody text.\n" });
+await tools.zetaoffice.text({ action: "style", style_name: "Title", paragraph_n: 1 });
+await tools.zetaoffice.save({ action: "export", file_path: "bench/out/B2/report.odt", export_format: "odt" });
+await tools.zetaoffice.save({ action: "export", file_path: "bench/out/B2/report.pdf", export_format: "pdf" });
+return { landscape: (await U({ op: "get", h: style, name: "IsLandscape" })).value };
+```
+
+Margins and page size are in 1/100 mm (1.5 cm = 1500). Verify by reading
+`IsLandscape`, `Width`/`Height` and the header/footer strings; do not inspect
+the PDF.
+
 ### Math formula
 
 ```

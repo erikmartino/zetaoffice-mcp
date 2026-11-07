@@ -170,7 +170,7 @@ def check_b2(d):
     text = pdf_text(pdf) if pdf else ""
     landscape = False
     try:
-        raw = open(pdf, "rb").read(4000).decode("latin-1", "replace")
+        raw = open(pdf, "rb").read().decode("latin-1", "replace")
         m = re.search(r"MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)", raw)
         landscape = bool(m) and float(m.group(1)) > float(m.group(2))
     except Exception:
