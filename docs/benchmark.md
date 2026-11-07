@@ -120,11 +120,11 @@ A run is only valid if the environment and the grading are fixed.
 | ID | Prompt | Acceptance checks |
 | --- | --- | --- |
 | A1 | Create `bench/out/A1/letter.odt`: title "Notice of Inspection", a date line, two body paragraphs. Export `letter.pdf` beside it. | ODT > 5 KB; PDF > 5 KB; first paragraph style is `Title`; text contains the date line |
-| A2 | Create `bench/out/A2/weights.xlsx`: columns `Date`, `Weight (g)` with 5 weekly rows (increasing weights), and a line chart with X = Date, Y = Weight (g). | xlsx exists; one chart in the package; header row bold; values match |
+| A2 | Create `bench/out/A2/weights.xlsx`: columns `Date`, `Weight (g)` with a bold header row and 5 weekly rows (increasing weights), and a line chart with X = Date, Y = Weight (g). | xlsx exists; one chart in the package; header row bold; values match |
 | A3 | Create `bench/out/A3/report.odt` with a title, one paragraph, then an embedded Calc sheet (2 columns × 4 rows) below it. Save ODT and DOCX. | ODT contains `Object 1/`; DOCX contains `word/embeddings/`; object count is 1 |
 | A4 | Create `bench/out/A4/report.odt` with an embedded Calc sheet, fill it with 6 rows (header + 5 data rows), add a column chart, and export `report.pdf` beside it. Save the ODT too. | ODT has an embedded sheet; 6 rows; chart present; PDF exists |
 | A5 | Insert `x = {-b +- sqrt{b^2 - 4ac}} over 2a` as a native Math object into a new Writer document; save `formula.odt`. | ODT contains a Math object (`Object 1`); formula text present |
-| A6 | Create a Calc sheet with a header row, freeze it, bold it, set column widths, and export `table.xlsx`. | freeze pane on row 1; bold header; widths set; xlsx exists |
+| A6 | Create `bench/out/A6/table.xlsx`: a Calc sheet with a header row, freeze it, bold it, set column widths, and export the xlsx. | freeze pane on row 1; bold header; widths set; xlsx exists |
 | A7 | Use `describe` to list the methods of `com.sun.star.text.XText` and report the signature of `insertString`. | answer names all params with types/modes; no document needed |
 | A8 | Create `bench/out/A8/note.odt` with a heading and a paragraph, export it as DOCX and PDF, and open it in the browser. | ODT, DOCX and PDF exist; a browser tab shows the document |
 | A9 | Restart the bridge cleanly and confirm it is healthy. | health green after restart; one Wasm runtime; no orphan processes |

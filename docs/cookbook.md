@@ -455,6 +455,46 @@ Six rows = header + 4 data rows + total. The total formula syntax is `sum<C2:C5>
 (accepted as a real Writer formula, `ooow:sum` in the ODT). The save response
 and `count`/`value` are the verification; do not re-read cells afterwards.
 
+### Calc header: bold, widths, freeze (A6 fast path)
+
+```js
+const U = (o) => tools.zetaoffice.uno(o);
+const doc = await tools.zetaoffice.document({ action: "create", doc_type: "calc" });
+await tools.zetaoffice.sheet({ action: "write", values: [
+  ["Product", "Region", "Units", "Unit Price", "Revenue"],
+  ["Widget", "EU", 120, 4.5, "=C2*D2"],
+] });
+await tools.zetaoffice.sheet({ action: "format", range: "A1:E1", bold: true });
+await tools.zetaoffice.sheet({ action: "column_width", column: "A", width_mm: 42 });
+const ctl = (await U({ op: "call", h: doc.handle.$h, name: "getCurrentController" })).value.$h;
+const fz = (await U({ op: "query", h: ctl, iface: "com.sun.star.sheet.XViewFreezable" })).value.$h;
+await U({ op: "call", h: fz, name: "freezeAtPosition", args: [0, 1] });
+const frozen = (await U({ op: "get", h: ctl, name: "HasFrozenPanes" })).value;
+await tools.zetaoffice.save({ action: "export",
+  file_path: "bench/out/A6/table.xlsx", export_format: "xlsx" });
+return { frozen };
+```
+
+`freezeAtPosition(0, 1)` freezes row 1; `HasFrozenPanes` is the verification.
+
+### Calc line chart (A2 fast path)
+
+```js
+const doc = await tools.zetaoffice.document({ action: "create", doc_type: "calc" });
+await tools.zetaoffice.sheet({ action: "write", values: [
+  ["Date", "Weight (g)"], ["2026-10-05", 68.2], ["2026-10-12", 68.9],
+  ["2026-10-19", 69.4], ["2026-10-26", 70.1], ["2026-11-02", 70.6],
+] });
+await tools.zetaoffice.sheet({ action: "format", range: "A1:B1", bold: true });
+await tools.zetaoffice.sheet({ action: "chart", chart_type: "line",
+  data_range: "A1:B6", title: "Weekly Weight" });
+await tools.zetaoffice.save({ action: "export",
+  file_path: "bench/out/A2/weights.xlsx", export_format: "xlsx" });
+```
+
+`sheet {action:"chart"}` works on the active Calc document and turns the first
+column into category labels. No UNO is needed for the basic line chart.
+
 ### Math formula
 
 ```

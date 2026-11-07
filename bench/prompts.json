@@ -27,7 +27,7 @@
     {
       "id": "A2",
       "group": "cookbook",
-      "prompt": "Create bench/out/A2/weights.xlsx: columns Date, Weight (g) with 5 weekly rows (increasing weights), and a line chart with X = Date, Y = Weight (g).",
+      "prompt": "Create bench/out/A2/weights.xlsx: columns Date, Weight (g) with a bold header row and 5 weekly rows (increasing weights), and a line chart with X = Date, Y = Weight (g).",
       "output_dir": "bench/out/A2",
       "checks": [
         "xlsx exists",
@@ -72,7 +72,7 @@
     {
       "id": "A6",
       "group": "cookbook",
-      "prompt": "Create a Calc sheet with a header row, freeze it, bold it, set column widths, and export table.xlsx.",
+      "prompt": "Create bench/out/A6/table.xlsx: a Calc sheet with a header row, freeze it, bold it, set column widths, and export the xlsx.",
       "output_dir": "bench/out/A6",
       "checks": [
         "freeze pane row 1",
