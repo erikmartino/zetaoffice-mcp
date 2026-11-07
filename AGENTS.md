@@ -34,11 +34,14 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
    Restart the *bridge* with `bridge {action:"restart"}` (or
    `curl -X POST localhost:8765/restart`). Killing the stdio process removes the
    tools from the session.
-8. **Stale browser tabs lie.** The bridge prefers the newest ready browser tab;
+8. **Never benchmark on a stale MCP.** If `cookbook`/`bridge` are missing, abort
+   with `STALE MCP` — do not work around it. `scripts/bench.mjs reset` also
+   refuses when the running `start.mjs` predates `mcp_stdio_server.mjs`.
+9. **Stale browser tabs lie.** The bridge prefers the newest ready browser tab;
    an old tab can answer with "not implemented". Restart the bridge, open a
    fresh tab, or target `?target=node` for headless work.
-9. **One client, one document.** Keep the handle returned by `create`/`load`;
-   `getCurrentComponent()` may be a different open document.
+10. **One client, one document.** Keep the handle returned by `create`/`load`;
+    `getCurrentComponent()` may be a different open document.
 
 ## Benchmark discipline
 

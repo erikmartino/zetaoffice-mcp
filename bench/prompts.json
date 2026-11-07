@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "preamble": "You have the zetaoffice MCP for LibreOffice. Call cookbook first and bridge {action:\"status\"}. Prefer the high-level tools (document, text, sheet, embed, save). Use uno with describe only when the cookbook has no recipe. Verify results by reading state back, then report the file paths.",
+  "preamble": "You have the zetaoffice MCP for LibreOffice. First call bridge {action:\"status\"} and cookbook. If either tool is missing, reply exactly STALE MCP and stop - do not work around it with shell or other tools. Otherwise: prefer the high-level tools (document, text, sheet, embed, save); use uno with describe only when the cookbook has no recipe; verify results by reading state back; report the file paths.",
   "targets": {
     "cookbook": {
       "tool_calls": 8,

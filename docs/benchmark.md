@@ -47,11 +47,15 @@ Checklist before each run:
 
 ### Preamble (recommended for the "guided" variant)
 
-> You have the zetaoffice MCP for LibreOffice. Call `cookbook` first and
-> `bridge {action:"status"}`. Prefer the high-level tools (`document`, `text`,
-> `sheet`, `embed`, `save`). Use `uno` with `describe` only when the cookbook
-> has no recipe. Verify results by reading state back, then report the file
-> paths.
+> You have the zetaoffice MCP for LibreOffice. First call `bridge {action:"status"}`
+> and `cookbook`. **If either tool is missing, reply exactly `STALE MCP` and
+> stop — do not work around it with shell or other tools.** Otherwise prefer the
+> high-level tools (`document`, `text`, `sheet`, `embed`, `save`). Use `uno`
+> with `describe` only when the cookbook has no recipe. Verify results by
+> reading state back, then report the file paths.
+
+The `STALE MCP` abort is part of the protocol: a run on an older server does not
+measure the current improvements.
 
 ### Cold variant
 

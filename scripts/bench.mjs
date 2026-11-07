@@ -13,6 +13,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -38,6 +39,41 @@ function promptById(pid) {
 }
 
 const BASE = process.env.LIBREOFFICE_URL || 'http://localhost:8765';
+
+function newestMtime(files) {
+  return Math.max(...files.map((f) => fs.statSync(f).mtimeMs));
+}
+
+// Seconds the OLDEST running MCP stdio server has been alive. Returns null when
+// none is running (the client will spawn a fresh one).
+function oldestMcpElapsedSeconds() {
+  let out;
+  try { out = execSync('ps -eo etimes=,args=', { encoding: 'utf8' }); } catch (e) { return null; }
+  let oldest = -1;
+  for (const line of out.split('\n')) {
+    if (!line.includes('zetaoffice-mcp/start.mjs')) continue;
+    const m = /^\s*(\d+)\s+/.exec(line);
+    if (m) oldest = Math.max(oldest, Number(m[1]));
+  }
+  return oldest < 0 ? null : oldest;
+}
+
+function assertFreshMcp(force) {
+  if (force) return;
+  const files = [path.join(ROOT, 'mcp_stdio_server.mjs'), path.join(ROOT, 'start.mjs')]
+    .filter((f) => fs.existsSync(f));
+  const fileAge = (Date.now() - newestMtime(files)) / 1000;
+  const mcpAge = oldestMcpElapsedSeconds();
+  if (mcpAge === null) return; // no server yet; the client spawns the current code
+  if (mcpAge > fileAge) {
+    console.error('\nSTALE MCP SERVER - refusing to benchmark.');
+    console.error(`  oldest running start.mjs: ${Math.round(mcpAge)}s old`);
+    console.error(`  MCP code last changed:    ${Math.round(fileAge)}s ago`);
+    console.error('  Restart OpenCode so fresh agents get the current tools,');
+    console.error('  or run with --force to override.\n');
+    process.exit(1);
+  }
+}
 
 async function waitHealth(timeoutMs = 30000) {
   const start = Date.now();
@@ -73,6 +109,7 @@ if (cmd === 'list' || !cmd) {
   console.log(`prepared ${dir}`);
 } else if (cmd === 'reset') {
   const p = promptById(id);
+  assertFreshMcp(rest.includes('--force'));
   const dir = path.isAbsolute(p.output_dir) ? p.output_dir : path.join(ROOT, p.output_dir);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
@@ -81,7 +118,13 @@ if (cmd === 'list' || !cmd) {
   } catch (e) { /* bridge not running; nothing to restart */ }
   await new Promise((r) => setTimeout(r, 1200));
   const healthy = await waitHealth();
-  console.log(`reset ${p.id}: cleaned ${dir}; bridge ${healthy ? 'healthy' : 'NOT healthy'}`);
+  let commit = null;
+  try {
+    const res = await fetch(BASE + '/health', { signal: AbortSignal.timeout(1000) });
+    commit = (await res.json()).commit || null;
+  } catch (e) { /* ignore */ }
+  console.log(`reset ${p.id}: cleaned ${dir}; bridge ${healthy ? 'healthy' : 'NOT healthy'}${commit ? ` (commit ${commit})` : ''}`);
+  if (!healthy) process.exit(1);
   printPrompt(p);
 } else if (cmd === 'prompt') {
   printPrompt(promptById(id));

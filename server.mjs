@@ -13,6 +13,15 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const PORT = parseInt(process.env.LIBREOFFICE_PORT || process.env.PORT || '8765', 10);
 
+// Build identity for /health, so benchmark runs can detect a stale bridge.
+const BUILD_COMMIT = (() => {
+  try {
+    return execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString().trim();
+  } catch (e) { return null; }
+})();
+const STARTED_AT = new Date().toISOString();
+
 const IS_HEADLESS = process.argv.includes('--headless') ||
   process.env.HEADLESS === 'true' ||
   process.env.HEADLESS === '1' ||
@@ -450,6 +459,9 @@ const server = http.createServer(async (req, res) => {
       connected_clients: connectedClients.size,
       mode: IS_HEADLESS ? 'headless' : 'browser',
       headless_running: !!headlessProcess,
+      commit: BUILD_COMMIT,
+      started_at: STARTED_AT,
+      pid: process.pid,
       url: `http://localhost:${PORT}`
     }));
     return;
