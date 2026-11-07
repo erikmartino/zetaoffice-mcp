@@ -273,12 +273,91 @@ def check_b12(d):
     ]
 
 
+def check_c1(d):
+    odt, pdf = first(d, ".odt"), first(d, ".pdf")
+    xml = zip_text(odt, "content.xml") if odt else ""
+    styles = zip_text(odt, "styles.xml") if odt else ""
+    text = pdf_text(pdf) if pdf else ""
+    return [
+        ("odt exists", bool(odt), odt),
+        ("two-column section", 'column-count="2"' in xml, ""),
+        ("header text", "Internal" in text, ""),
+        ("page-number field", "page-number" in xml or "page-number" in styles, ""),
+        ("pdf exists", bool(pdf), pdf),
+    ]
+
+
+def check_c2(d):
+    xlsx = first(d, ".xlsx")
+    sheet = zip_text(xlsx, "xl/worksheets/sheet1.xml") if xlsx else ""
+    styles = zip_text(xlsx, "xl/styles.xml") if xlsx else ""
+    return [
+        ("xlsx exists", bool(xlsx), xlsx),
+        ("merged title", "<mergeCell" in sheet, ""),
+        ("SUM formula", bool(re.search(r"<f[^>]*>[^<]*SUM", sheet, re.I)), ""),
+        ("currency format", ("numFmt" in styles and ("$" in styles or "currency" in styles.lower())), ""),
+        ("frozen header", 'state="frozen"' in sheet, ""),
+    ]
+
+
+def check_c3(d):
+    odt = first(d, ".odt")
+    xml = zip_text(odt, "content.xml") if odt else ""
+    names = zip_names(odt) if odt else []
+    return [
+        ("odt exists", bool(odt), odt),
+        ("native table", "<table:table" in xml, ""),
+        ("sum formula", "ooow:sum" in xml or "sum&lt;" in xml, ""),
+        ("embedded sheet", any(n.startswith("Object 1/") for n in names), ""),
+    ]
+
+
+def check_c4(d):
+    odt, pdf = first(d, ".odt"), first(d, ".pdf")
+    xml = zip_text(odt, "content.xml") if odt else ""
+    return [
+        ("odt exists", bool(odt), odt),
+        ("bookmark", "text:bookmark" in xml, ""),
+        ("internal link", 'xlink:href="#details"' in xml, ""),
+        ("footnote", "text:footnote" in xml or "text:note" in xml, ""),
+        ("pdf exists", bool(pdf), pdf),
+    ]
+
+
+def check_c5(d):
+    pptx = first(d, ".pptx")
+    names = zip_names(pptx) if pptx else []
+    slides = [n for n in names if re.match(r"ppt/slides/slide\d+\.xml$", n)]
+    notes = [n for n in names if re.match(r"ppt/notesSlides/notesSlide\d+\.xml$", n)]
+    notes_text = any(re.search(r"<a:t>[^<]+", zip_text(pptx, n)) for n in notes) if pptx else False
+    return [
+        ("pptx exists", bool(pptx), pptx),
+        ("4 slides", len(slides) >= 4, str(len(slides))),
+        ("speaker notes", notes_text, ""),
+    ]
+
+
+def check_c6(d):
+    xlsx = first(d, ".xlsx")
+    names = zip_names(xlsx) if xlsx else []
+    sheet2 = zip_text(xlsx, "xl/worksheets/sheet2.xml") if xlsx else ""
+    chart = zip_text(xlsx, "xl/charts/chart1.xml") if xlsx else ""
+    return [
+        ("xlsx exists", bool(xlsx), xlsx),
+        ("two sheets", "xl/worksheets/sheet2.xml" in names, ""),
+        ("summary formula", bool(re.search(r'<c r="B2"[^>]*>.*?<f', sheet2, re.S)), ""),
+        ("date axis", "<c:dateAx" in chart or "dateAx" in chart, ""),
+    ]
+
+
 CHECKS = {
     "A1": check_a1, "A2": check_a2, "A3": check_a3, "A4": check_a4, "A5": check_a5,
     "A6": check_a6, "A8": check_a8, "A9": check_a9, "A10": check_a10,
     "B1": check_b1, "B2": check_b2, "B3": check_b3, "B4": check_b4, "B5": check_b5,
     "B6": check_b6, "B7": check_b7, "B8": check_b8, "B9": check_b9, "B10": check_b10,
     "B11": check_b11, "B12": check_b12,
+    "C1": check_c1, "C2": check_c2, "C3": check_c3, "C4": check_c4,
+    "C5": check_c5, "C6": check_c6,
 }
 
 

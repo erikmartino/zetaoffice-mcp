@@ -151,6 +151,21 @@ A run is only valid if the environment and the grading are fixed.
 | B11 | Create a document with a figure caption and a cross-reference ("see figure 1") that updates when the caption number changes. | caption + REF field; reference text resolves |
 | B12 | Create a Calc sheet with dates in A and values in B, insert a chart, and make the X axis use a date axis instead of text categories. | axis uses dates; labels formatted as dates |
 
+## C — held-out validation
+
+These compose mechanisms in combinations that are **not** recorded as recipes.
+Do not add a C prompt to the cookbook; if one fails, generalize the underlying
+mechanism. Rotate them after cookbook changes.
+
+| ID | Prompt | Acceptance checks |
+| --- | --- | --- |
+| C1 | Create `bench/out/C1/notice.odt` with a two-column section containing one paragraph, a header "Internal", and a footer with a page number. Export `notice.pdf`. | two-column section; header text; page-number field; PDF |
+| C2 | Create `bench/out/C2/invoice.xlsx`: merged A1:C1 title "Invoice"; Item/Qty/Price header; 3 data rows; SUM total row; currency Price; frozen header. | merge; SUM formula; currency; freeze pane |
+| C3 | Create `bench/out/C3/report.odt` with a heading, a native table (Item/Qty/Price) with 2 data rows and a sum total, then an embedded Calc sheet (2×3). | native table; sum formula; embedded sheet |
+| C4 | Create `bench/out/C4/brief.odt` with two paragraphs, bookmark `details` on p2, a link from p1 to it, and a footnote on p1; export PDF. | bookmark; internal link; footnote; PDF |
+| C5 | Create `bench/out/C5/briefing.pptx` with 4 slides and speaker notes on the second. | 4 slides; notes text |
+| C6 | Create `bench/out/C6/dashboard.xlsx` with Data (dates/values, 6 rows) and Summary (SUM in B2), plus a line chart with a date X axis. | two sheets; formula; date axis |
+
 ## Recording
 
 ```

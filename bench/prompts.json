@@ -9,6 +9,10 @@
     "novel": {
       "tool_calls": 20,
       "seconds": 300
+    },
+    "heldout": {
+      "tool_calls": 25,
+      "seconds": 300
     }
   },
   "prompts": [
@@ -250,6 +254,80 @@
       "checks": [
         "axis uses dates",
         "labels formatted as dates"
+      ]
+    },
+    {
+      "id": "C1",
+      "group": "heldout",
+      "prompt": "Create bench/out/C1/notice.odt with a two-column section containing one paragraph, a header reading \"Internal\", and a footer with a page number. Export bench/out/C1/notice.pdf.",
+      "output_dir": "bench/out/C1",
+      "checks": [
+        "odt exists",
+        "two-column section",
+        "header text",
+        "page-number field",
+        "pdf exists"
+      ]
+    },
+    {
+      "id": "C2",
+      "group": "heldout",
+      "prompt": "Create bench/out/C2/invoice.xlsx: A1:C1 merged title \"Invoice\"; header row Item, Qty, Price; 3 data rows; a total row whose Price cell uses a SUM formula; Price cells formatted as currency; freeze the header row.",
+      "output_dir": "bench/out/C2",
+      "checks": [
+        "xlsx exists",
+        "merged title",
+        "SUM formula",
+        "currency format",
+        "frozen header"
+      ]
+    },
+    {
+      "id": "C3",
+      "group": "heldout",
+      "prompt": "Create bench/out/C3/report.odt with a heading, a native Writer table (Item, Qty, Price) with 2 data rows and a total row using a sum formula, then an embedded Calc sheet (2 columns x 3 rows) below it. Save the ODT.",
+      "output_dir": "bench/out/C3",
+      "checks": [
+        "odt exists",
+        "native table",
+        "sum formula",
+        "embedded sheet"
+      ]
+    },
+    {
+      "id": "C4",
+      "group": "heldout",
+      "prompt": "Create bench/out/C4/brief.odt with two paragraphs. Add a bookmark named details to paragraph 2, a link from paragraph 1 to it, and a footnote on paragraph 1. Export bench/out/C4/brief.pdf.",
+      "output_dir": "bench/out/C4",
+      "checks": [
+        "odt exists",
+        "bookmark",
+        "internal link",
+        "footnote",
+        "pdf exists"
+      ]
+    },
+    {
+      "id": "C5",
+      "group": "heldout",
+      "prompt": "Create bench/out/C5/briefing.pptx with four slides: cover, two content slides, closing. Add speaker notes to the second slide.",
+      "output_dir": "bench/out/C5",
+      "checks": [
+        "pptx exists",
+        "4 slides",
+        "speaker notes"
+      ]
+    },
+    {
+      "id": "C6",
+      "group": "heldout",
+      "prompt": "Create bench/out/C6/dashboard.xlsx with two sheets: Data (dates in A, values in B, 6 rows) and Summary (a SUM formula in B2). Insert a line chart on Data with a date X axis.",
+      "output_dir": "bench/out/C6",
+      "checks": [
+        "xlsx exists",
+        "two sheets",
+        "summary formula",
+        "date axis"
       ]
     }
   ]
