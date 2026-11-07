@@ -43,7 +43,8 @@ Checklist before each run:
 2. Start the timer when the prompt is delivered, stop when every check passes.
 3. Record: wall time, tool calls, failed calls, retries, whether it read the
    cookbook, whether it used `describe`.
-4. Delete the output and reset again before the next prompt.
+4. Grade with `node scripts/bench.mjs check <id>`, then reset again before the
+   next prompt.
 
 ### Preamble (recommended for the "guided" variant)
 
@@ -86,9 +87,9 @@ A run is only valid if the environment and the grading are fixed.
 
 **Grade mechanically**
 
-- Put checks in a script, not prose: file size, zip entries (`Object 1/`,
-  `word/embeddings/`, `xl/charts/chart1.xml`), cell values via `sheet read`,
-  text via `pdftotext`.
+- Put checks in a script, not prose. `node scripts/bench.mjs check <id>` runs
+  `scripts/bench_check.py` (file size, zip entries, cells, `pdftotext`);
+  prompts without a mechanical check print `MANUAL`.
 - Pass = every check; partial = list which failed.
 - Repeat 3× per prompt and report the median and range.
 

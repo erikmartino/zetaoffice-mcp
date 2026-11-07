@@ -51,7 +51,8 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
 - Freeze the toolset: verify the running MCP server has the current tools
   (`cookbook`, `bridge`, `embed`, `uno`) before starting; otherwise the run is
   invalid.
-- Grade with mechanical checks, not prose. Repeat runs (N≥3) and use medians.
+- Grade with `node scripts/bench.mjs check <id>` (mechanical), not prose. Repeat
+  runs (N≥3) and use medians.
 - Promote **concepts**, not task specifics: add a recipe only when the same
   mechanism recurs in unknown tasks; strip task values from the pattern.
 

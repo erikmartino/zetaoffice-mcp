@@ -7,13 +7,14 @@
  *   node scripts/bench.mjs start <id>            # start the timer
  *   node scripts/bench.mjs stop <id> [--calls N] [--pass 1] [--guided 1]
  *        [--cookbook 1] [--describe 0] [--failed 0] [--notes "text"]
+ *   node scripts/bench.mjs check <id>           # mechanical artifact checks
  *   node scripts/bench.mjs summary
  *
  * Timers live in bench/.timer/, results in bench/results.csv.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -128,6 +129,10 @@ if (cmd === 'list' || !cmd) {
   printPrompt(p);
 } else if (cmd === 'prompt') {
   printPrompt(promptById(id));
+} else if (cmd === 'check') {
+  const p = promptById(id);
+  const res = spawnSync('python3', [path.join(ROOT, 'scripts', 'bench_check.py'), p.id], { stdio: 'inherit' });
+  process.exit(res.status ?? 1);
 } else if (cmd === 'start') {
   promptById(id);
   fs.mkdirSync(TIMERS, { recursive: true });
@@ -177,6 +182,6 @@ if (cmd === 'list' || !cmd) {
     console.log(`${p.id}\t${p.group}\t${rec.n}\t${avg}\t${rec.pass}/${rec.n}\t${calls}`);
   }
 } else {
-  console.error('Commands: list, prompt, prepare, reset, start, stop, summary');
+  console.error('Commands: list, prompt, prepare, reset, start, stop, check, summary');
   process.exit(1);
 }
