@@ -54,14 +54,17 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
     supplier/control `setVisualAreaSize` path.
 14. **Track changes has no high-level support.** Set `RecordChanges` on the
     model; accept with `DispatchHelper.executeDispatch(".uno:AcceptAllTrackedChanges")`.
-15. **`set_enum` is the general fix for silent 0s.** Short and enum
+15. **Long tasks share state.** Use `document.handle` from `create`; activate a
+    sheet before adding its chart or freezing panes; do not read LibreOffice
+    source over the network (`describe`/IDL is enough).
+16. **`set_enum` is the general fix for silent 0s.** Short and enum
     properties can be inferred as Long by `set`: `NumberingLevel`, `AxisType`,
     `SequenceValue`, `ReferenceFieldSource`, `ReferenceFieldPart`. `set_enum`
     reads the Type from the property descriptor and works; read the value back.
-16. **Conditional formatting is a known engine gap.** The range-level
+17. **Conditional formatting is a known engine gap.** The range-level
     `ConditionalFormat` entries are not serialized to ODS/XLSX in this build.
     Do not spend calls on it; note the limitation.
-17. **Verify with tool reads, not artifacts.** Read state back
+18. **Verify with tool reads, not artifacts.** Read state back
     (`structure`, `sheet read`, `embed` counts). Do not unzip packages, run
     `pdftoppm`, or inspect screenshots to find out what happened.
 

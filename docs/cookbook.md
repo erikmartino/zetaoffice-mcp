@@ -42,7 +42,7 @@ sub-recipe directly (topics match `##` and `###` headings).
 ```
 bridge   {action:"status"}                  # is the Wasm runtime up?
 cookbook {topic:"embed"}                    # read the matching recipe
-document {action:"create", doc_type:"writer"}
+document {action:"create", doc_type:"writer"}   # returns handle: {$h}
 text     {action:"insert", content:"Title\nBody text\n"}
 text     {action:"style", style_name:"Title", paragraph_n:1}
 save     {action:"export", file_path:"/abs/path/out.odt", export_format:"odt"}
@@ -817,6 +817,37 @@ lists. Export: ODT stores the list level styles in `styles.xml`.
 - **AutoFilter**: select the range and dispatch `.uno:DataFilterAutoFilter`
   with `DispatchHelper`. In xlsx this exports as a table
   (`xl/tables/*.xml` with `<autoFilter>`), not as a sheet-level element.
+
+**Validation (LIST = 6):** `ValidationType.LIST` is `6`, not 3. Create the
+validation on the range, query `XSheetCondition2`, set the formula, then assign
+the validation back to the range and read it back.
+
+```js
+const v = (await U({ op: "get", h: range, name: "Validation" })).value.$h;
+const cond = (await U({ op: "query", h: v, iface: "com.sun.star.sheet.XSheetCondition2" })).value.$h;
+await U({ op: "set_enum", h: v, name: "Type", value: 6 }); // LIST
+await U({ op: "call", h: cond, name: "setFormula1", args: ["$Inputs.$A$1:$A$3"] });
+await U({ op: "set", h: v, name: "ShowList", value: true });
+await U({ op: "set", h: v, name: "IgnoreBlankCells", value: true });
+await U({ op: "call", h: range, name: "setPropertyValue", args: ["Validation", { $h: v }] });
+```
+
+**Freeze panes** need an active sheet first, then the controller's
+`XViewFreezable`; the sheet argument to `freezeAtPosition(cols, rows)` counts
+columns/rows to freeze.
+
+```js
+const ctrl = (await U({ op: "call", h, name: "getCurrentController" })).value.$h;
+await U({ op: "call", h: ctrl, name: "setActiveSheet", args: [{ $h: sheet }] });
+const fz = (await U({ op: "query", h: ctrl, iface: "com.sun.star.sheet.XViewFreezable" })).value.$h;
+await U({ op: "call", h: fz, name: "freezeAtPosition", args: [0, 1] });
+const frozen = (await U({ op: "get", h: ctrl, name: "HasFrozenPanes" })).value;
+```
+
+**Multi-sheet formulas** use `Sheet.Cell` notation in this build:
+`=SUM(Monthly.B2:B7)` / `=AVERAGE(Monthly.B2:B7)`; export normalizes them.
+Create sheets with `getSheets().insertNewByName(name, index)` and rename with
+`sheet.setName(...)`. Activate a sheet before adding a chart to it.
 
 ### Writer frames and shapes
 
