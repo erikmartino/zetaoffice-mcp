@@ -733,15 +733,18 @@ whole document.`,
       return toolError("cookbook", "Cookbook not found.", `Expected ${file}.`);
     }
     if (topic) {
-      const re = new RegExp("^##\\s+.*" + topic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ".*$", "im");
+      const re = new RegExp("^(#{2,3})\\s+.*" + topic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ".*$", "im");
       const m = re.exec(text);
       if (m) {
         const start = m.index;
-        const next = text.indexOf("\n## ", start + 1);
-        text = text.slice(start, next === -1 ? undefined : next);
+        const level = m[1].length;
+        const nextRe = new RegExp(`\\n#{2,${level}} `);
+        const tail = text.slice(start + m[0].length);
+        const next = nextRe.exec(tail);
+        text = text.slice(start, next ? start + m[0].length + next.index : undefined);
       } else {
         text = `No section matching '${topic}'. Sections:\n` +
-          (text.match(/^##\s+.*$/gm) || []).join("\n");
+          (text.match(/^#{2,3}\\s+.*$/gm) || []).join("\n");
       }
     }
     return { content: [{ type: "text", text }] };

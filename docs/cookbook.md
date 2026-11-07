@@ -16,6 +16,25 @@ should be able to follow it using only these tools.
 Tools: `document`, `text`, `sheet`, `embed`, `save`, `bridge`, `uno`
 (`root/get/set/call/query/create/describe/release/handles`).
 
+## 0. Find a recipe
+
+Match the task to a heading; `cookbook {topic:"<word>"}` returns that section or
+sub-recipe directly (topics match `##` and `###` headings).
+
+| Task | Look at |
+| --- | --- |
+| text, paragraphs, styles | Styled Writer document; R1–R5 |
+| tables with totals | Writer table with a computed total |
+| math objects | Math formula |
+| embedded Calc + chart | Embedded Calc sheet with a chart |
+| Calc data, charts, freeze | Calc: header formatting; Calc: data series |
+| page size, margins, header/footer | Page setup |
+| track changes | Track changes with UNO |
+| footnotes, comments | Footnote and annotation comment |
+| captions, cross-references | Caption with a live sequence cross-reference |
+| images, watermarks | Picture; Text watermark |
+| export | Save, export, show in the browser |
+
 ---
 
 ## 1. Quickstart
@@ -718,23 +737,23 @@ const updateFields = () => U({ op: "call", h: helper, name: "executeDispatch",
 
 const before = { caption: await presented(seq), reference: await presented(ref) };
 
-// Prove the link: renumber the caption and update fields.
-await U({ op: "set_enum", h: seq, name: "SequenceValue", value: 2 });
-await updateFields();
-const after = { caption: await presented(seq), reference: await presented(ref) };
-await U({ op: "set_enum", h: seq, name: "SequenceValue", value: 1 });
-await updateFields();
-
 await tools.zetaoffice.save({ action: "export", file_path: "out/caption.odt", export_format: "odt" });
-return { before, after };
+return { before };
 ```
 
-`before` should be `{caption:"1", reference:"1"}` and `after`
-`{caption:"2", reference:"2"}` — that proves the reference follows the caption.
-Without the `SequenceNumber` call the reference stays
-`Error: Reference source not found`. The reference is live: refreshing
-fields re-expands the stored sequence number, so plain typed text is not a
-substitute.
+`before` should be `{caption:"1", reference:"1"}`. Without the `SequenceNumber`
+call the reference stays `Error: Reference source not found`.
+
+**Renumbering is document order.** Writer numbers sequence fields by their
+position, not by `SequenceValue`. Changing `SequenceValue` alone does **not**
+change the caption number in this build, so do not use that as the liveness
+test. To prove liveness, insert another `Figure` sequence caption *before* this
+one and dispatch `UpdateFields`: the first caption and the reference become 2.
+`SequenceValue`/`SequenceNumber` are cached values; after a real renumbering,
+update the reference's `SequenceNumber` or refresh fields so it follows.
+
+The default field masters (`Figure`, `Illustration`, `Table`, `Text`, `Drawing`)
+already exist on a fresh document; `getByName` is safe.
 
 Enum values used: `SetVariableType.SEQUENCE=1`, `NumberingType.ARABIC=4`,
 `ReferenceFieldSource.SEQUENCE_FIELD=1`, `ReferenceFieldPart.ONLY_SEQUENCE_NUMBER=7`
