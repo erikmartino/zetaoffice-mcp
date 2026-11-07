@@ -620,6 +620,7 @@ Common dead ends and their fix:
 | Browser tab not updating | stale cached page | reload the tab; the bridge reloads old tabs once |
 | `'<tool>' is not implemented` | the active client is an old browser tab | restart the bridge, open a fresh tab, or use `?target=node` |
 | Float property rejects a number | integer became Long | use `{"$f":1.5}` for floats |
+| Conditional format vanishes on export | `range.ConditionalFormat.addNew()` accepts the entry but it is not attached to the sheet model in this build; the ODS/XLSX writers emit nothing | known engine gap (B3): report it instead of retrying; `XConditionalFormats.createByRange` needs an `XSheetCellRanges` that is not reachable here |
 
 ---
 
