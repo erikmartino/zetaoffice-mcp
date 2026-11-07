@@ -51,15 +51,15 @@ function initDefaultDocument() {
   }
 }
 
-// Get the current active document displayed on the canvas
+// Get the active document. The document created or loaded through the tools is
+// authoritative: in headless mode getCurrentComponent() can keep returning the
+// initial welcome Writer document after an Impress/Calc document is created.
 function getDoc() {
+  if (xModel) return xModel;
   try {
     if (zHT && zHT.desktop && typeof zHT.desktop.getCurrentComponent === 'function') {
       const cur = zHT.desktop.getCurrentComponent();
-      if (cur) {
-        xModel = cur;
-        return cur;
-      }
+      if (cur) xModel = cur;
     }
   } catch {}
   return xModel;
@@ -715,51 +715,477 @@ function unoDispatch(req) {
   }
 }
 
+// ─── Impress slide builder ──────────────────────────────────────────────────
 // Build a real Impress (presentation) document with one slide per entry.
-// `slides` is an array of { title, text }. Uses the UNO drawing/text API.
+// `slides` is an array of { title, text, notes, layout }. Drawing shapes must
+// be created through the document factory (doc.createInstance); the global
+// service manager returns null for com.sun.star.drawing.TextShape.
+const SLIDE_W = 28000; // 1/100 mm — 28 cm, 16:9
+const SLIDE_H = 15750; // 1/100 mm — 15.75 cm
+
+const SLIDE_SERIF = 'Liberation Serif';
+const SLIDE_SANS = 'Liberation Sans';
+const SLIDE_PALETTE = {
+  navy: 0x0B1F3A,
+  navyDeep: 0x071426,
+  navyPanel: 0x10294A,
+  navyWatermark: 0x17365D,
+  gold: 0xC8A24A,
+  goldSoft: 0xE4CE94,
+  ivory: 0xF7F5F0,
+  slate: 0x1F2937,
+  body: 0x3A4656,
+  muted: 0x7A8698,
+  line: 0xD8D2C4,
+  white: 0xFFFFFF,
+  coverText: 0xC9D3E0,
+  coverMuted: 0x8FA3BF,
+};
+
+const SLIDE_ALIGN = {
+  left: () => css.style.ParagraphAdjust.LEFT,
+  right: () => css.style.ParagraphAdjust.RIGHT,
+  center: () => css.style.ParagraphAdjust.CENTER,
+};
+
+function createDrawingShape(doc, serviceName) {
+  let shape = null;
+  try { shape = doc.createInstance(serviceName); } catch (e) { /* fall back below */ }
+  if (!shape) {
+    try {
+      const sm = zHT.context.getServiceManager();
+      shape = sm.createInstanceWithContext(serviceName, zHT.context);
+    } catch (e) { /* leave null */ }
+  }
+  return shape;
+}
+
+function setShapeFill(shape, color) {
+  try {
+    setUnoProp(shape, 'FillStyle', Module.uno_Type.Enum('com.sun.star.drawing.FillStyle'),
+      css.drawing.FillStyle.SOLID);
+    setUnoProp(shape, 'FillColor', Module.uno_Type.Long(), color);
+  } catch (e) { /* fill is cosmetic */ }
+}
+
+function setShapeNoLine(shape) {
+  try {
+    setUnoProp(shape, 'LineStyle', Module.uno_Type.Enum('com.sun.star.drawing.LineStyle'),
+      css.drawing.LineStyle.NONE);
+  } catch (e) { /* line is cosmetic */ }
+}
+
+function addSlideRect(doc, page, x, y, w, h, color) {
+  const shape = createDrawingShape(doc, 'com.sun.star.drawing.RectangleShape');
+  if (!shape) return null;
+  shape.setPosition(new css.awt.Point({ X: x, Y: y }));
+  shape.setSize(new css.awt.Size({ Width: w, Height: h }));
+  setShapeFill(shape, color);
+  setShapeNoLine(shape);
+  page.add(shape);
+  return shape;
+}
+
+// Add a formatted text box. Formatting is applied to a select-all cursor so it
+// reaches the text that was just inserted (typing attributes would not).
+function addSlideText(doc, page, opts) {
+  const shape = createDrawingShape(doc, 'com.sun.star.drawing.TextShape');
+  if (!shape) throw new Error('Could not create a drawing TextShape (Impress drawing module unavailable)');
+  shape.setPosition(new css.awt.Point({ X: opts.x, Y: opts.y }));
+  shape.setSize(new css.awt.Size({ Width: opts.w, Height: opts.h }));
+  setShapeNoLine(shape);
+  try {
+    setUnoProp(shape, 'FillStyle', Module.uno_Type.Enum('com.sun.star.drawing.FillStyle'),
+      css.drawing.FillStyle.NONE);
+  } catch (e) { /* cosmetic */ }
+  try { setUnoProp(shape, 'TextAutoGrowHeight', Module.uno_Type.Boolean(), false); } catch (e) {}
+  try { setUnoProp(shape, 'TextWordWrap', Module.uno_Type.Boolean(), true); } catch (e) {}
+  if (opts.valign) {
+    try {
+      setUnoProp(shape, 'TextVerticalAdjust',
+        Module.uno_Type.Enum('com.sun.star.drawing.TextVerticalAdjust'),
+        css.drawing.TextVerticalAdjust[opts.valign.toUpperCase()]);
+    } catch (e) { /* vertical alignment is cosmetic */ }
+  }
+  page.add(shape);
+
+  let xText = null;
+  try { xText = queryInterface(shape, 'com.sun.star.text.XText'); } catch (e) { xText = null; }
+  if (!xText && typeof shape.getText === 'function') {
+    try { xText = shape.getText(); } catch (e) { xText = null; }
+  }
+  if (!xText) {
+    // Last resort for builds where the shape only exposes the String property.
+    setUnoProp(shape, 'String', Module.uno_Type.String(), String(opts.text || ''));
+    return shape;
+  }
+
+  xText.setString(String(opts.text || ''));
+  const cur = xText.createTextCursor();
+  try { cur.gotoEnd(true); } catch (e) { /* format whole text when possible */ }
+
+  setUnoProp(cur, 'CharHeight', Module.uno_Type.Float(), opts.size || 18);
+  setUnoProp(cur, 'CharWeight', Module.uno_Type.Float(), opts.bold ? 150.0 : 100.0);
+  setUnoProp(cur, 'CharPosture', Module.uno_Type.Enum('com.sun.star.awt.FontSlant'),
+    opts.italic ? css.awt.FontSlant.ITALIC : css.awt.FontSlant.NONE);
+  setUnoProp(cur, 'CharColor', Module.uno_Type.Long(),
+    opts.color === undefined ? SLIDE_PALETTE.body : opts.color);
+  setUnoProp(cur, 'CharFontName', Module.uno_Type.String(), opts.font || SLIDE_SANS);
+  if (opts.spacing) {
+    try { setUnoProp(cur, 'CharKerning', Module.uno_Type.Short(), opts.spacing); } catch (e) {}
+  }
+  if (opts.align && SLIDE_ALIGN[opts.align]) {
+    try {
+      setUnoProp(cur, 'ParaAdjust', Module.uno_Type.Enum('com.sun.star.style.ParagraphAdjust'),
+        SLIDE_ALIGN[opts.align]());
+    } catch (e) { /* alignment is cosmetic */ }
+  }
+  if (opts.lineSpacing) {
+    try {
+      const spacing = new css.style.LineSpacing({
+        Mode: css.style.LineSpacingMode.PROP,
+        Height: opts.lineSpacing,
+      });
+      setUnoProp(cur, 'ParaLineSpacing',
+        Module.uno_Type.Struct('com.sun.star.style.LineSpacing'), spacing);
+    } catch (e) { /* line spacing is cosmetic */ }
+  }
+  if (opts.spaceBelow) {
+    try { setUnoProp(cur, 'ParaBottomMargin', Module.uno_Type.Long(), opts.spaceBelow); } catch (e) {}
+  }
+  return shape;
+}
+
+function addSlideNotes(page, notes) {
+  try {
+    const notesPage = page.getNotesPage();
+    if (!notesPage) return false;
+    const count = notesPage.getCount();
+    let target = null;
+    for (let i = 0; i < count && !target; i++) {
+      const sh = notesPage.getByIndex(i);
+      let isNotes = false;
+      try {
+        isNotes = !!(sh.supportsService &&
+          sh.supportsService('com.sun.star.presentation.NotesShape'));
+      } catch (e) { isNotes = false; }
+      if (isNotes) target = sh;
+    }
+    // Fall back to the last text-capable shape on the notes page.
+    for (let i = count - 1; i >= 0 && !target; i--) {
+      try {
+        if (queryInterface(notesPage.getByIndex(i), 'com.sun.star.text.XText')) {
+          target = notesPage.getByIndex(i);
+        }
+      } catch (e) { /* keep looking */ }
+    }
+    if (!target) return false;
+    const xText = queryInterface(target, 'com.sun.star.text.XText');
+    if (!xText) return false;
+    xText.setString(String(notes));
+    const cur = xText.createTextCursor();
+    try { cur.gotoEnd(true); } catch (e) {}
+    setUnoProp(cur, 'CharHeight', Module.uno_Type.Float(), 12);
+    setUnoProp(cur, 'CharFontName', Module.uno_Type.String(), SLIDE_SANS);
+    setUnoProp(cur, 'CharColor', Module.uno_Type.Long(), SLIDE_PALETTE.body);
+    return true;
+  } catch (e) {
+    console.warn('[ZetaJS Worker] Could not add speaker notes:', e);
+    return false;
+  }
+}
+
+function addGoldFrame(doc, page) {
+  const inset = 700;
+  const t = 26;
+  addSlideRect(doc, page, inset, inset, SLIDE_W - 2 * inset, t, SLIDE_PALETTE.gold);
+  addSlideRect(doc, page, inset, SLIDE_H - inset - t, SLIDE_W - 2 * inset, t, SLIDE_PALETTE.gold);
+  addSlideRect(doc, page, inset, inset, t, SLIDE_H - 2 * inset, SLIDE_PALETTE.gold);
+  addSlideRect(doc, page, SLIDE_W - inset - t, inset, t, SLIDE_H - 2 * inset, SLIDE_PALETTE.gold);
+}
+
+function addSlideKicker(doc, page, text, x, y, w, align) {
+  addSlideText(doc, page, {
+    text: String(text || '').toUpperCase(),
+    x, y, w, h: 520,
+    size: 9.5, bold: true, color: SLIDE_PALETTE.gold,
+    spacing: 200, align: align || 'left',
+  });
+}
+
+function addSlideHeader(doc, page, slide, kicker) {
+  addSlideRect(doc, page, 0, 0, SLIDE_W, 120, SLIDE_PALETTE.navy);
+  addSlideRect(doc, page, 0, 120, SLIDE_W, 28, SLIDE_PALETTE.gold);
+  addSlideKicker(doc, page, kicker || 'Capabilities Brief', 1400, 800, 18000, 'left');
+  addSlideText(doc, page, {
+    text: slide.title || '',
+    x: 1400, y: 1400, w: 24600, h: 2250,
+    size: 29, bold: true, color: SLIDE_PALETTE.navy,
+    font: SLIDE_SERIF, align: 'left',
+  });
+  addSlideRect(doc, page, 1400, 3760, 1500, 52, SLIDE_PALETTE.gold);
+}
+
+function addSlideFooter(doc, page, index, total) {
+  addSlideRect(doc, page, 1400, 14280, 25200, 14, SLIDE_PALETTE.line);
+  addSlideRect(doc, page, 1400, 14160, 140, 50, SLIDE_PALETTE.gold);
+  addSlideText(doc, page, {
+    text: 'ZETAOFFICE MCP · CAPABILITIES BRIEF',
+    x: 1700, y: 14380, w: 16000, h: 500,
+    size: 8, color: SLIDE_PALETTE.muted, spacing: 120, align: 'left',
+  });
+  addSlideText(doc, page, {
+    text: `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`,
+    x: 24000, y: 14380, w: 2600, h: 500,
+    size: 8.5, bold: true, color: SLIDE_PALETTE.navy, align: 'right',
+  });
+}
+
+function renderCoverSlide(doc, page, slide) {
+  addSlideRect(doc, page, 0, 0, SLIDE_W, SLIDE_H, SLIDE_PALETTE.navyDeep);
+  addSlideRect(doc, page, 19500, 0, 8500, SLIDE_H, SLIDE_PALETTE.navyPanel);
+  addSlideRect(doc, page, 19480, 0, 34, SLIDE_H, SLIDE_PALETTE.gold);
+  addGoldFrame(doc, page);
+
+  // Monogram
+  addSlideRect(doc, page, 1500, 1420, 720, 720, SLIDE_PALETTE.gold);
+  addSlideText(doc, page, {
+    text: 'Z', x: 1500, y: 1420, w: 720, h: 720,
+    size: 24, bold: true, color: SLIDE_PALETTE.navyDeep,
+    font: SLIDE_SERIF, align: 'center', valign: 'center',
+  });
+
+  addSlideKicker(doc, page, 'Capabilities Brief · 2026', 1500, 3920, 16000, 'left');
+  addSlideText(doc, page, {
+    text: slide.title || 'Presentation',
+    x: 1500, y: 4400, w: 17200, h: 4200,
+    size: 42, bold: true, color: SLIDE_PALETTE.white,
+    font: SLIDE_SERIF, align: 'left', lineSpacing: 110,
+  });
+  addSlideRect(doc, page, 1500, 9080, 2600, 64, SLIDE_PALETTE.gold);
+  if (slide.text) {
+    addSlideText(doc, page, {
+      text: slide.text,
+      x: 1500, y: 9340, w: 17400, h: 3600,
+      size: 16.5, color: SLIDE_PALETTE.coverText, align: 'left', lineSpacing: 150,
+    });
+  }
+  addSlideText(doc, page, {
+    text: 'ZETAOFFICE MCP · LIBREOFFICE WEBASSEMBLY',
+    x: 1500, y: 13520, w: 17200, h: 500,
+    size: 8, color: SLIDE_PALETTE.coverMuted, spacing: 140, align: 'left',
+  });
+  addSlideText(doc, page, {
+    text: '2026', x: 20900, y: 12600, w: 5200, h: 900,
+    size: 13, color: SLIDE_PALETTE.goldSoft, font: SLIDE_SERIF,
+    spacing: 300, align: 'center',
+  });
+  addSlideRect(doc, page, 24720, 13540, 520, 18, SLIDE_PALETTE.goldSoft);
+}
+
+function renderContentSlide(doc, page, slide, index, total) {
+  addSlideRect(doc, page, 0, 0, SLIDE_W, SLIDE_H, SLIDE_PALETTE.ivory);
+  addSlideHeader(doc, page, slide, slide.kicker || 'Capabilities Brief');
+  if (slide.text) {
+    addSlideText(doc, page, {
+      text: slide.text,
+      x: 1400, y: 4200, w: 25200, h: 9300,
+      size: 19, color: SLIDE_PALETTE.body, align: 'left',
+      lineSpacing: 145, spaceBelow: 900, valign: 'center',
+    });
+  }
+  addSlideFooter(doc, page, index, total);
+}
+
+function renderStatsSlide(doc, page, slide, index, total) {
+  addSlideRect(doc, page, 0, 0, SLIDE_W, SLIDE_H, SLIDE_PALETTE.ivory);
+  addSlideHeader(doc, page, slide, slide.kicker || 'At a Glance');
+
+  const defaults = [
+    { value: '4', label: 'Document types' },
+    { value: '9', label: 'Tool groups' },
+    { value: '8+', label: 'Export formats' },
+    { value: '0', label: 'Cloud dependencies' },
+  ];
+  const items = (Array.isArray(slide.stats) && slide.stats.length ? slide.stats : defaults).slice(0, 4);
+  const gap = 700;
+  const w = Math.floor((25200 - gap * (items.length - 1)) / items.length);
+  const top = 5300;
+
+  items.forEach((item, i) => {
+    const x = 1400 + i * (w + gap);
+    addSlideRect(doc, page, x, top, w, 20, SLIDE_PALETTE.navy);
+    addSlideRect(doc, page, x, top + 20, 900, 52, SLIDE_PALETTE.gold);
+    addSlideText(doc, page, {
+      text: String(item.value || ''),
+      x, y: top + 430, w, h: 2300,
+      size: 46, bold: true, color: SLIDE_PALETTE.navy,
+      font: SLIDE_SERIF, align: 'left',
+    });
+    addSlideText(doc, page, {
+      text: String(item.label || '').toUpperCase(),
+      x, y: top + 3000, w, h: 1800,
+      size: 9.5, color: SLIDE_PALETTE.muted, spacing: 160, align: 'left',
+    });
+  });
+  addSlideFooter(doc, page, index, total);
+}
+
+function renderStepsSlide(doc, page, slide, index, total) {
+  addSlideRect(doc, page, 0, 0, SLIDE_W, SLIDE_H, SLIDE_PALETTE.ivory);
+  addSlideHeader(doc, page, slide, slide.kicker || 'Our Process');
+
+  const defaults = [
+    { title: 'Brief', text: 'Describe the deliverable in plain language.' },
+    { title: 'Plan', text: 'The agent structures sections, data and tone.' },
+    { title: 'Build', text: 'Native UNO edits happen in the live document.' },
+    { title: 'Deliver', text: 'Export to DOCX, XLSX, PPTX or PDF.' },
+  ];
+  const items = (Array.isArray(slide.steps) && slide.steps.length ? slide.steps : defaults).slice(0, 4);
+  const gap = 700;
+  const w = Math.floor((25200 - gap * (items.length - 1)) / items.length);
+  const top = 4800;
+
+  items.forEach((item, i) => {
+    const x = 1400 + i * (w + gap);
+    addSlideRect(doc, page, x, top, w, 16, SLIDE_PALETTE.line);
+    addSlideText(doc, page, {
+      text: String(i + 1).padStart(2, '0'),
+      x, y: top + 260, w, h: 1000,
+      size: 20, bold: true, color: SLIDE_PALETTE.gold,
+      font: SLIDE_SERIF, align: 'left',
+    });
+    addSlideText(doc, page, {
+      text: String(item.title || ''),
+      x, y: top + 1350, w, h: 900,
+      size: 15, bold: true, color: SLIDE_PALETTE.navy,
+      font: SLIDE_SERIF, align: 'left',
+    });
+    if (item.text) {
+      addSlideText(doc, page, {
+        text: item.text,
+        x, y: top + 2300, w, h: 3600,
+        size: 11.5, color: SLIDE_PALETTE.body, align: 'left', lineSpacing: 140,
+      });
+    }
+  });
+  addSlideFooter(doc, page, index, total);
+}
+
+function renderSectionSlide(doc, page, slide, part) {
+  addSlideRect(doc, page, 0, 0, SLIDE_W, SLIDE_H, SLIDE_PALETTE.navyDeep);
+  addGoldFrame(doc, page);
+  addSlideText(doc, page, {
+    text: String(part).padStart(2, '0'),
+    x: 19800, y: 4700, w: 6800, h: 9000,
+    size: 150, bold: true, color: SLIDE_PALETTE.navyWatermark,
+    font: SLIDE_SERIF, align: 'right',
+  });
+  addSlideKicker(doc, page, `Part ${String(part).padStart(2, '0')}`, 1600, 5400, 15000, 'left');
+  addSlideText(doc, page, {
+    text: slide.title || '',
+    x: 1600, y: 5850, w: 17200, h: 2600,
+    size: 40, bold: true, color: SLIDE_PALETTE.white,
+    font: SLIDE_SERIF, align: 'left', lineSpacing: 110,
+  });
+  addSlideRect(doc, page, 1600, 8720, 2200, 64, SLIDE_PALETTE.gold);
+  if (slide.text) {
+    addSlideText(doc, page, {
+      text: slide.text,
+      x: 1600, y: 8980, w: 19600, h: 3000,
+      size: 16.5, color: SLIDE_PALETTE.coverText, align: 'left', lineSpacing: 145,
+    });
+  }
+  addSlideText(doc, page, {
+    text: 'ZETAOFFICE MCP',
+    x: 1600, y: 14100, w: 12000, h: 500,
+    size: 8, color: SLIDE_PALETTE.coverMuted, spacing: 140, align: 'left',
+  });
+}
+
+function renderClosingSlide(doc, page, slide) {
+  addSlideRect(doc, page, 0, 0, SLIDE_W, SLIDE_H, SLIDE_PALETTE.navyDeep);
+  addGoldFrame(doc, page);
+  addSlideKicker(doc, page, 'Next Step', 4000, 5200, 20000, 'center');
+  addSlideText(doc, page, {
+    text: slide.title || 'Thank You',
+    x: 2000, y: 5650, w: 24000, h: 2800,
+    size: 42, bold: true, color: SLIDE_PALETTE.white,
+    font: SLIDE_SERIF, align: 'center', lineSpacing: 110,
+  });
+  addSlideRect(doc, page, 12900, 8620, 2200, 64, SLIDE_PALETTE.gold);
+  if (slide.text) {
+    addSlideText(doc, page, {
+      text: slide.text,
+      x: 4000, y: 8880, w: 20000, h: 3000,
+      size: 16.5, color: SLIDE_PALETTE.coverText, align: 'center', lineSpacing: 145,
+    });
+  }
+  addSlideText(doc, page, {
+    text: 'ZETAOFFICE MCP · LIBREOFFICE WEBASSEMBLY',
+    x: 4000, y: 13520, w: 20000, h: 500,
+    size: 8, color: SLIDE_PALETTE.coverMuted, spacing: 140, align: 'center',
+  });
+}
+
 function buildImpressDocument(slides) {
   const doc = zHT.desktop.loadComponentFromURL('private:factory/simpress', '_default', 0, []);
-  const serviceManager = zHT.context.getServiceManager();
-  const createShape = () => serviceManager.createInstanceWithContext(
-    'com.sun.star.drawing.TextShape', zHT.context);
+  if (!doc) throw new Error('Could not create an Impress document');
   const pages = doc.getDrawPages();
 
-  const list = (Array.isArray(slides) && slides.length) ? slides : [{ title: 'Presentation', text: '' }];
+  const list = (Array.isArray(slides) && slides.length)
+    ? slides
+    : [{ title: 'Presentation', text: '' }];
 
-  function addTextBox(page, text, position, size, charHeight, bold) {
-    const shape = createShape();
-    shape.setPosition(new css.awt.Point(position));
-    shape.setSize(new css.awt.Size(size));
-    page.add(shape);
-    const xText = queryInterface(shape, 'com.sun.star.text.XText');
-    xText.setString(String(text));
-    const cur = xText.createTextCursor();
-    setUnoProp(cur, 'CharHeight', Module.uno_Type.Float(), charHeight);
-    if (bold) {
-      setUnoProp(cur, 'CharWeight', Module.uno_Type.Float(), 150.0);
-    }
+  while (pages.getCount() < list.length) {
+    pages.insertNewByIndex(pages.getCount());
+  }
+  for (let i = pages.getCount() - 1; i >= list.length; i--) {
+    try { pages.remove(pages.getByIndex(i)); } catch (e) { /* keep page */ }
   }
 
+  let partNumber = 0;
   for (let i = 0; i < list.length; i++) {
     const slide = list[i] || {};
-    let page;
-    if (i < pages.getCount()) {
-      page = pages.getByIndex(i);
-    } else {
-      page = pages.insertNewByIndex(pages.getCount());
+    const page = pages.getByIndex(i);
+
+    // 16:9 canvas; drop the default title/content placeholders.
+    try {
+      setUnoProp(page, 'Width', Module.uno_Type.Long(), SLIDE_W);
+      setUnoProp(page, 'Height', Module.uno_Type.Long(), SLIDE_H);
+    } catch (e) { /* keep the default page size */ }
+    for (let s = page.getCount() - 1; s >= 0; s--) {
+      try { page.remove(page.getByIndex(s)); } catch (e) { /* keep shape */ }
     }
 
-    if (slide.title) {
-      addTextBox(page, slide.title, { X: 1200, Y: 800 }, { Width: 25600, Height: 3200 }, 32.0, true);
+    const layout = String(slide.layout || (i === 0 ? 'cover' : 'content')).toLowerCase();
+    if (layout === 'cover') {
+      renderCoverSlide(doc, page, slide);
+    } else if (layout === 'section') {
+      partNumber += 1;
+      renderSectionSlide(doc, page, slide, partNumber);
+    } else if (layout === 'closing' || layout === 'end') {
+      renderClosingSlide(doc, page, slide);
+    } else if (layout === 'stats') {
+      renderStatsSlide(doc, page, slide, i, list.length);
+    } else if (layout === 'steps') {
+      renderStepsSlide(doc, page, slide, i, list.length);
+    } else {
+      renderContentSlide(doc, page, slide, i, list.length);
     }
-    if (slide.text) {
-      addTextBox(page, slide.text, { X: 1400, Y: 4400 }, { Width: 25200, Height: 14000 }, 22.0, false);
-    }
+
+    if (slide.notes) addSlideNotes(page, slide.notes);
   }
+
+  const deckTitle = (list[0] && list[0].title) ? String(list[0].title) : 'Presentation';
+  try {
+    const props = doc.getDocumentProperties();
+    setUnoProp(props, 'Title', Module.uno_Type.String(), deckTitle);
+  } catch (e) { /* metadata is optional */ }
 
   xModel = doc;
   currentDocType = 'impress';
-  currentDocTitle = 'Presentation';
+  currentDocTitle = deckTitle;
   return doc;
 }
 
@@ -1010,9 +1436,17 @@ zHT.thrPort.onmessage = (event) => {
         const str = textObj ? textObj.getString() : '';
         let pageCount = 1;
         try {
-          const controller = doc.getCurrentController();
-          if (controller && typeof controller.getPageCount === 'function') {
-            pageCount = controller.getPageCount();
+          if (typeof doc.getDrawPages === 'function') {
+            // Impress/Draw: one draw page per slide.
+            const drawPages = doc.getDrawPages();
+            if (drawPages && typeof drawPages.getCount === 'function') {
+              pageCount = drawPages.getCount();
+            }
+          } else {
+            const controller = doc.getCurrentController();
+            if (controller && typeof controller.getPageCount === 'function') {
+              pageCount = controller.getPageCount();
+            }
           }
         } catch {}
         result = {

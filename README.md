@@ -91,6 +91,33 @@ index; `align:"center"` and `display:true` place it on its own centered
 paragraph. ODT keeps the object exactly; DOCX converts it to OMML, where
 LibreOffice may lose complex layout such as n-ary limits.
 
+### Presentations
+
+`document {action:"create", doc_type:"presentation", slides:[...]}` builds a
+native 16:9 Impress deck — one slide per entry, laid out with real drawing
+shapes and exported as ODP, PPTX, PPT or PDF:
+
+```json
+{
+  "action": "create",
+  "doc_type": "presentation",
+  "slides": [
+    { "layout": "cover", "title": "Quarterly Review", "text": "Q3 results and next steps" },
+    { "title": "Highlights", "text": "• Revenue up 18%\n• Two new markets", "notes": "Mention the hiring plan." },
+    { "layout": "closing", "title": "Thank You", "text": "Questions?" }
+  ]
+}
+```
+
+`layout` is `cover` (default for the first slide), `content`, `section`,
+`closing`, `stats` or `steps`. The builder uses a navy/gold corporate design
+system: serif headlines, a gold-framed cover, oversized part numbers on section
+dividers, and a consistent footer. `notes` adds speaker notes, `kicker`
+overrides the small label above the title, `stats` renders up to four
+`{value, label}` figures, and `steps` renders up to four `{title, text}` process
+columns. `text` is plain text — `\n` starts a new paragraph, so use `• `
+prefixes for bullets. There is no Markdown parsing.
+
 ---
 
 ## 🚀 Quick Start
