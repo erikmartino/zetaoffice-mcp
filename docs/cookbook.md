@@ -711,12 +711,28 @@ const dp = (await U({ op: "query", h: frame, iface: "com.sun.star.frame.XDispatc
 await U({ op: "call", h: helper, name: "executeDispatch",
   args: [{ $h: dp }, ".uno:UpdateFields", "_self", 0, []] });
 
-const refShown = (await U({ op: "call", h: ref, name: "getPresentation", args: [false] })).value; // "1"
+const presented = async (field) => (await U({ op: "call", h: field,
+  name: "getPresentation", args: [false] })).value;
+const updateFields = () => U({ op: "call", h: helper, name: "executeDispatch",
+  args: [{ $h: dp }, ".uno:UpdateFields", "_self", 0, []] });
+
+const before = { caption: await presented(seq), reference: await presented(ref) };
+
+// Prove the link: renumber the caption and update fields.
+await U({ op: "set_enum", h: seq, name: "SequenceValue", value: 2 });
+await updateFields();
+const after = { caption: await presented(seq), reference: await presented(ref) };
+await U({ op: "set_enum", h: seq, name: "SequenceValue", value: 1 });
+await updateFields();
+
 await tools.zetaoffice.save({ action: "export", file_path: "out/caption.odt", export_format: "odt" });
+return { before, after };
 ```
 
-`refShown === "1"` is the verification; without the `SequenceNumber` call it
-stays `Error: Reference source not found`. The reference is live: refreshing
+`before` should be `{caption:"1", reference:"1"}` and `after`
+`{caption:"2", reference:"2"}` — that proves the reference follows the caption.
+Without the `SequenceNumber` call the reference stays
+`Error: Reference source not found`. The reference is live: refreshing
 fields re-expands the stored sequence number, so plain typed text is not a
 substitute.
 
