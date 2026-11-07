@@ -13,6 +13,10 @@
     "heldout": {
       "tool_calls": 25,
       "seconds": 300
+    },
+    "explore": {
+      "tool_calls": 30,
+      "seconds": 300
     }
   },
   "prompts": [
@@ -328,6 +332,88 @@
         "two sheets",
         "summary formula",
         "date axis"
+      ]
+    },
+    {
+      "id": "D1",
+      "group": "explore",
+      "prompt": "Create bench/out/D1/list.odt with a Heading 1, then a numbered list of 3 items, with a nested bulleted list of 2 items under item 2.",
+      "output_dir": "bench/out/D1",
+      "checks": [
+        "odt exists",
+        "numbered list",
+        "nested list",
+        "5+ list items"
+      ]
+    },
+    {
+      "id": "D2",
+      "group": "explore",
+      "prompt": "Create bench/out/D2/form.xlsx with a Status dropdown (data validation list: Open, In Progress, Done) in B2:B10, and a named range StatusList for A1:A3.",
+      "output_dir": "bench/out/D2",
+      "checks": [
+        "xlsx exists",
+        "data validation",
+        "named range"
+      ]
+    },
+    {
+      "id": "D3",
+      "group": "explore",
+      "prompt": "Create bench/out/D3/totals.xlsx: A1:B7 with Region and Amount (6 data rows), E1:F2 with two regions and SUMIF totals, and an AutoFilter on A1:B7.",
+      "output_dir": "bench/out/D3",
+      "checks": [
+        "xlsx exists",
+        "SUMIF formula",
+        "AutoFilter",
+        "region totals"
+      ]
+    },
+    {
+      "id": "D4",
+      "group": "explore",
+      "prompt": "Create bench/out/D4/deck.pptx with 2 slides: slide 1 title \"Roadmap\"; slide 2 a 3x2 table and bench/assets/sample.png.",
+      "output_dir": "bench/out/D4",
+      "checks": [
+        "pptx exists",
+        "2 slides",
+        "table",
+        "image"
+      ]
+    },
+    {
+      "id": "D5",
+      "group": "explore",
+      "prompt": "Create bench/out/D5/flyer.odt with a paragraph, a text frame containing \"Sidebar\", and a rectangle shape containing \"Box\".",
+      "output_dir": "bench/out/D5",
+      "checks": [
+        "odt exists",
+        "text frame",
+        "rectangle",
+        "labels"
+      ]
+    },
+    {
+      "id": "D6",
+      "group": "explore",
+      "prompt": "Create bench/out/D6/embed.odt with a paragraph and an embedded Writer document containing two paragraphs below it.",
+      "output_dir": "bench/out/D6",
+      "checks": [
+        "odt exists",
+        "embedded writer",
+        "two paragraphs"
+      ]
+    },
+    {
+      "id": "D7",
+      "group": "explore",
+      "prompt": "Create bench/out/D7/shapes.odg with a rectangle and an ellipse, and export bench/out/D7/shapes.pdf.",
+      "output_dir": "bench/out/D7",
+      "checks": [
+        "odg exists",
+        "rectangle",
+        "ellipse",
+        "pdf exists"
       ]
     }
   ]

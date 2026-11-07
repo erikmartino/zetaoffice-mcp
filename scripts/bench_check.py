@@ -350,6 +350,87 @@ def check_c6(d):
     ]
 
 
+def check_d1(d):
+    odt = first(d, ".odt")
+    xml = zip_text(odt, "content.xml") if odt else ""
+    return [
+        ("odt exists", bool(odt), odt),
+        ("numbered list", "list-level-style-number" in xml, ""),
+        ("nested list", len(re.findall(r"<text:list[ >]", xml)) >= 2, str(len(re.findall(r"<text:list[ >]", xml)))),
+        ("5+ list items", len(re.findall(r"<text:list-item", xml)) >= 5, str(len(re.findall(r"<text:list-item", xml)))),
+    ]
+
+
+def check_d2(d):
+    xlsx = first(d, ".xlsx")
+    sheet = zip_text(xlsx, "xl/worksheets/sheet1.xml") if xlsx else ""
+    wb = zip_text(xlsx, "xl/workbook.xml") if xlsx else ""
+    return [
+        ("xlsx exists", bool(xlsx), xlsx),
+        ("data validation", "<dataValidation" in sheet, ""),
+        ("named range", "definedName" in wb and "StatusList" in wb, ""),
+    ]
+
+
+def check_d3(d):
+    xlsx = first(d, ".xlsx")
+    sheet = zip_text(xlsx, "xl/worksheets/sheet1.xml") if xlsx else ""
+    return [
+        ("xlsx exists", bool(xlsx), xlsx),
+        ("SUMIF formula", bool(re.search(r"<f[^>]*>[^<]*SUMIF", sheet, re.I)), ""),
+        ("AutoFilter", "<autoFilter" in sheet, ""),
+        ("region totals", len(re.findall(r"SUMIF", sheet, re.I)) >= 2, str(len(re.findall(r"SUMIF", sheet, re.I)))),
+    ]
+
+
+def check_d4(d):
+    pptx = first(d, ".pptx")
+    names = zip_names(pptx) if pptx else []
+    slide2 = zip_text(pptx, "ppt/slides/slide2.xml") if pptx else ""
+    media = [n for n in names if n.startswith("ppt/media/")]
+    slides = [n for n in names if re.match(r"ppt/slides/slide\d+\.xml$", n)]
+    return [
+        ("pptx exists", bool(pptx), pptx),
+        ("2 slides", len(slides) >= 2, str(len(slides))),
+        ("table", "<a:tbl" in slide2, ""),
+        ("image", bool(media), str(len(media))),
+    ]
+
+
+def check_d5(d):
+    odt = first(d, ".odt")
+    xml = zip_text(odt, "content.xml") if odt else ""
+    return [
+        ("odt exists", bool(odt), odt),
+        ("text frame", "<draw:text-box" in xml or "<draw:frame" in xml, ""),
+        ("rectangle", "<draw:rect" in xml, ""),
+        ("labels", "Sidebar" in xml and "Box" in xml, ""),
+    ]
+
+
+def check_d6(d):
+    odt = first(d, ".odt")
+    names = zip_names(odt) if odt else []
+    inner = zip_text(odt, "Object 1/content.xml") if odt else ""
+    return [
+        ("odt exists", bool(odt), odt),
+        ("embedded writer", "Object 1/" in " ".join(names), ""),
+        ("two paragraphs", len(re.findall(r"<text:p", inner)) >= 2, str(len(re.findall(r"<text:p", inner)))),
+    ]
+
+
+def check_d7(d):
+    odg = first(d, ".odg")
+    pdf = first(d, ".pdf")
+    xml = zip_text(odg, "content.xml") if odg else ""
+    return [
+        ("odg exists", bool(odg), odg),
+        ("rectangle", "<draw:rect" in xml, ""),
+        ("ellipse", "<draw:ellipse" in xml, ""),
+        ("pdf exists", bool(pdf), pdf),
+    ]
+
+
 CHECKS = {
     "A1": check_a1, "A2": check_a2, "A3": check_a3, "A4": check_a4, "A5": check_a5,
     "A6": check_a6, "A8": check_a8, "A9": check_a9, "A10": check_a10,
@@ -358,6 +439,8 @@ CHECKS = {
     "B11": check_b11, "B12": check_b12,
     "C1": check_c1, "C2": check_c2, "C3": check_c3, "C4": check_c4,
     "C5": check_c5, "C6": check_c6,
+    "D1": check_d1, "D2": check_d2, "D3": check_d3, "D4": check_d4,
+    "D5": check_d5, "D6": check_d6, "D7": check_d7,
 }
 
 

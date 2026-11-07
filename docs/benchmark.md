@@ -166,6 +166,22 @@ mechanism. Rotate them after cookbook changes.
 | C5 | Create `bench/out/C5/briefing.pptx` with 4 slides and speaker notes on the second. | 4 slides; notes text |
 | C6 | Create `bench/out/C6/dashboard.xlsx` with Data (dates/values, 6 rows) and Summary (SUM in B2), plus a line chart with a date X axis. | two sheets; formula; date axis |
 
+## D — exploration corners
+
+Deliberately unrecipe-d mechanisms: lists, data validation, SUMIF/filters,
+Impress tables/images, text frames/shapes, embedded Writer, Draw. Use these to
+find gaps, then generalize the mechanism (not the prompt).
+
+| ID | Prompt | Acceptance checks |
+| --- | --- | --- |
+| D1 | `bench/out/D1/list.odt`: Heading 1, numbered list of 3, nested bulleted list of 2 under item 2. | numbered + nested lists; 5+ items |
+| D2 | `bench/out/D2/form.xlsx`: Status dropdown in B2:B10; named range `StatusList` for A1:A3. | data validation; defined name |
+| D3 | `bench/out/D3/totals.xlsx`: A1:B7 Region/Amount, E1:F2 SUMIF totals, AutoFilter. | SUMIF; AutoFilter; two totals |
+| D4 | `bench/out/D4/deck.pptx`: 2 slides, slide 2 a 3×2 table + sample.png. | 2 slides; table; image |
+| D5 | `bench/out/D5/flyer.odt`: paragraph, text frame "Sidebar", rectangle "Box". | frame; rect; labels |
+| D6 | `bench/out/D6/embed.odt`: paragraph + embedded Writer with two paragraphs. | embedded Writer object; 2 paragraphs |
+| D7 | `bench/out/D7/shapes.odg`: rectangle + ellipse; export PDF. | rect; ellipse; PDF |
+
 ## Recording
 
 ```
