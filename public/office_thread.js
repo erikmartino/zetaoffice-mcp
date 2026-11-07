@@ -1128,7 +1128,8 @@ function unoDispatch(req) {
       const obj = unoGetHandle(req.h);
       const info = obj.getPropertySetInfo();
       const prop = info.getPropertyByName(req.name);
-      const any = new Module.uno_Any(prop.Type, req.value);
+      const enumValue = req.value !== undefined ? req.value : req.v;
+      const any = new Module.uno_Any(prop.Type, enumValue);
       try {
         obj.setPropertyValue(req.name, any);
       } finally {
