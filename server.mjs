@@ -386,6 +386,39 @@ process.on('exit', () => { stopHeadless(); });
 process.on('SIGINT', () => { stopHeadless(); process.exit(0); });
 process.on('SIGTERM', () => { stopHeadless(); process.exit(0); });
 
+let shuttingDown = false;
+// Graceful shutdown, optionally re-exec'ing the bridge after it exits. Used by
+// the /quit and /restart endpoints so development does not need kill -9.
+function shutdown(restart = false) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(restart ? '[Bridge] Restarting...' : '[Bridge] Shutting down...');
+  stopHeadless();
+  for (const client of connectedClients) {
+    try { client.terminate(); } catch (e) { /* ignore */ }
+  }
+  try { wss.close(); } catch (e) { /* ignore */ }
+  try { unoWss.close(); } catch (e) { /* ignore */ }
+  const finish = () => {
+    if (restart) {
+      try {
+        const child = spawn(process.execPath, process.argv.slice(1), {
+          detached: true,
+          stdio: 'ignore',
+          cwd: process.cwd(),
+          env: { ...process.env, ZETA_START_DELAY_MS: '800' },
+        });
+        child.unref();
+      } catch (e) {
+        console.error('[Bridge] Restart failed:', e.message);
+      }
+    }
+    process.exit(0);
+  };
+  server.close(finish);
+  setTimeout(finish, 800);
+}
+
 // Create HTTP server
 const server = http.createServer(async (req, res) => {
   const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
@@ -419,6 +452,20 @@ const server = http.createServer(async (req, res) => {
       headless_running: !!headlessProcess,
       url: `http://localhost:${PORT}`
     }));
+    return;
+  }
+
+  // Clean shutdown / restart for development (no kill -9, no orphan runtimes).
+  if (pathname === '/quit' || pathname === '/restart') {
+    const restart = pathname === '/restart';
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      success: true,
+      message: restart ? 'Restarting the bridge' : 'Shutting down the bridge',
+      restart,
+      url: `http://localhost:${PORT}`
+    }));
+    setTimeout(() => shutdown(restart), 150);
     return;
   }
 
@@ -715,6 +762,11 @@ unoWss.on('connection', (ws, req) => {
     console.log('[UNO] Client disconnected');
   });
 });
+
+// Delay startup when re-exec'ing from /restart so the old process releases the port.
+if (process.env.ZETA_START_DELAY_MS) {
+  await new Promise((resolve) => setTimeout(resolve, Number(process.env.ZETA_START_DELAY_MS) || 0));
+}
 
 server.listen(PORT, '0.0.0.0', () => {
   const url = `http://localhost:${PORT}`;

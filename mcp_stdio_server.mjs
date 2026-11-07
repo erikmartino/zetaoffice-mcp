@@ -716,6 +716,62 @@ whole document.`,
 );
 
 // =============================================================================
+// TOOL: bridge (start/stop/restart the Wasm bridge)
+// =============================================================================
+async function waitForBridge(timeoutMs = 20000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await checkHealth(LIBREOFFICE_URL)) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
+server.tool(
+  "bridge",
+  `Manage the LibreOffice Wasm bridge process.
+
+- status: health, mode and connected sessions.
+- start: spawn the bridge if it is not running, and wait until it is healthy.
+- restart: stop the bridge and start a fresh process, then wait until healthy.
+  Use this after changing server.mjs, office_thread.js or other worker code -
+  no kill -9 and no orphaned Wasm runtimes.
+- quit: shut the bridge down cleanly (stops the Wasm runtime too).`,
+  {
+    action: z.enum(["status", "start", "restart", "quit"]).describe("Operation to perform")
+  },
+  async ({ action }) => {
+    if (action === "status") {
+      return jsonResponse(await callLibreoffice("/health", "GET"));
+    }
+    if (action === "start") {
+      await ensureBridge();
+      const healthy = await waitForBridge();
+      return jsonResponse({
+        success: healthy,
+        message: healthy ? "Bridge is running" : "Bridge did not become healthy",
+        health: healthy ? await callLibreoffice("/health", "GET") : null
+      });
+    }
+    if (action === "restart") {
+      const response = await callLibreoffice("/restart", "POST", {});
+      await new Promise((r) => setTimeout(r, 1200));
+      const healthy = await waitForBridge();
+      return jsonResponse({
+        success: healthy,
+        message: healthy ? "Bridge restarted" : "Bridge did not come back",
+        restart: response,
+        health: healthy ? await callLibreoffice("/health", "GET") : null
+      });
+    }
+    if (action === "quit") {
+      return jsonResponse(await callLibreoffice("/quit", "POST", {}));
+    }
+    return toolError(action, `Invalid action '${action}'.`, "Valid actions: status, start, restart, quit.");
+  }
+);
+
+// =============================================================================
 // CONSOLIDATED TOOL 5: search
 // Actions: find, replace, replace_all
 // =============================================================================

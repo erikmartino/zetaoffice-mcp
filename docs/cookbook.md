@@ -142,6 +142,20 @@ uno {op:"set", h:atitle, name:"String", v:"Date"}
 - `document {action:"open_browser"}` mirrors the current document into a fresh
   browser tab. `?force=1` always opens a new tab.
 
+## Restart or stop the bridge
+
+After editing bridge or worker code, restart instead of killing processes:
+
+```
+bridge {action:"status"}    # health, mode, connected sessions
+bridge {action:"restart"}   # stop, re-exec, wait until healthy
+bridge {action:"start"}     # spawn it if it is not running
+bridge {action:"quit"}      # clean shutdown (also stops the Wasm runtime)
+```
+
+HTTP equivalents: `POST /restart`, `POST /quit`. A restart keeps the browser
+tabs; they reconnect and re-announce readiness automatically.
+
 ## Gotchas
 
 | Symptom | Cause | Fix |
