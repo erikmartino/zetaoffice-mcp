@@ -660,6 +660,85 @@ function writeGrid(range, values) {
   return { rows: grid.length, cols: width };
 }
 
+function columnLetters(index) {
+  let n = index + 1;
+  let s = '';
+  while (n > 0) {
+    const r = (n - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+// Size the OLE preview to the frame. Embedding captures the preview at
+// creation; without this the stored 90x23 mm preview is stretched to the frame.
+function applyEmbeddedPreview(model, frame, widthMm, heightMm) {
+  if (!model || !frame || !widthMm || !heightMm) return null;
+  const width = Math.round(Number(widthMm) * 100);   // 1/100 mm
+  const height = Math.round(Number(heightMm) * 100);
+  try {
+    model.setVisualAreaSize(4, new css.awt.Size({ Width: width, Height: height }));
+  } catch (e) { /* not every embedded model is visual */ }
+  try {
+    setUnoProp(frame, 'Width', Module.uno_Type.Long(), width);
+    setUnoProp(frame, 'Height', Module.uno_Type.Long(), height);
+  } catch (e) { /* optional */ }
+  let actual = null;
+  try { actual = model.getVisualAreaSize(4); } catch (e) { actual = null; }
+  return actual ? { width: actual.Width, height: actual.Height } : { width, height };
+}
+
+// Add a chart2 chart inside an embedded Calc model in one pass. This is the
+// sequence that works in the Wasm build (chart1 addNewByName + chart2 titles).
+function addEmbeddedChart(model, values, cfg) {
+  if (!model || typeof model.getSheets !== 'function') return null;
+  const sheet = model.getSheets().getByIndex(0);
+  const charts = sheet.getCharts();
+  const rows = Array.isArray(values) && values.length ? values.length : 6;
+  const cols = Math.max(1, ...(Array.isArray(values) ? values : []).map((r) => (Array.isArray(r) ? r.length : 1)));
+  const rangeName = cfg.range || `A1:${columnLetters(Math.max(0, cols - 1))}${Math.max(1, rows)}`;
+  const range = sheet.getCellRangeByName(rangeName);
+  const name = cfg.name || 'Chart1';
+  try { if (charts.hasByName(name)) charts.removeByName(name); } catch (e) { /* none */ }
+  const rect = new css.awt.Rectangle({
+    X: Math.round(cfg.x !== undefined ? cfg.x : 4800),
+    Y: Math.round(cfg.y !== undefined ? cfg.y : 200),
+    Width: Math.round(cfg.width !== undefined ? cfg.width : 10800),
+    Height: Math.round(cfg.height !== undefined ? cfg.height : 8600),
+  });
+  charts.addNewByName(name, rect, [range.getRangeAddress()], true, true);
+  const chartObj = charts.getByName(name);
+  const chart = chartObj.getEmbeddedObject();
+  try { setUnoProp(chart, 'HasMainTitle', Module.uno_Type.Boolean(), true); } catch (e) { /* optional */ }
+  if (cfg.title) {
+    try {
+      const title = chart.getTitle();
+      setUnoProp(title, 'String', Module.uno_Type.String(), String(cfg.title));
+    } catch (e) { console.log('[embed] chart title:', e.message); }
+  }
+  if (cfg.legend === false) {
+    try { setUnoProp(chart, 'HasLegend', Module.uno_Type.Boolean(), false); } catch (e) { /* optional */ }
+  }
+  let type = 'column';
+  try {
+    const diagram = chart.getFirstDiagram();
+    const cs = diagram.getCoordinateSystems()[0];
+    const makeTitle = (text) => {
+      const o = zHT.context.getServiceManager()
+        .createInstanceWithContext('com.sun.star.chart2.Title', zHT.context);
+      setUnoProp(o, 'String', Module.uno_Type.String(), String(text));
+      return o;
+    };
+    if (cfg.x_title) cs.getAxisByDimension(0, 0).setTitleObject(makeTitle(cfg.x_title));
+    if (cfg.y_title) cs.getAxisByDimension(1, 0).setTitleObject(makeTitle(cfg.y_title));
+    type = String(cs.getChartTypes()[0].getChartType() || 'column');
+  } catch (e) {
+    console.log('[embed] chart axes:', e.message);
+  }
+  return { name, range: rangeName, type };
+}
+
 // Query an interface from a ZetaJS proxy object via its queryInterface method.
 function queryInterface(obj, ifaceName) {
   const t = Module.uno_Type.Interface(ifaceName);
@@ -1966,6 +2045,12 @@ zHT.thrPort.onmessage = (event) => {
           const range = sheet.getCellRangeByPosition(0, 0, width - 1, Math.max(0, height - 1));
           written = writeGrid(range, params.values);
         }
+        let chart = null;
+        if (params.chart && model) {
+          try { chart = addEmbeddedChart(model, params.values, params.chart); }
+          catch (e) { console.log('[embed] chart failed:', e.message); }
+        }
+        const preview = applyEmbeddedPreview(model, obj, params.width_mm, params.height_mm);
 
         result = {
           success: true,
@@ -1975,6 +2060,8 @@ zHT.thrPort.onmessage = (event) => {
           object: { $h: unoPut(obj) },
           model: model ? { $h: unoPut(model) } : null,
           values: written,
+          chart,
+          preview,
         };
         break;
       }

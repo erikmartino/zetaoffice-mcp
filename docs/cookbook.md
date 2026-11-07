@@ -26,8 +26,14 @@ cookbook {topic:"embed"}                    # read the matching recipe
 document {action:"create", doc_type:"writer"}
 text     {action:"insert", content:"Title\nBody text\n"}
 text     {action:"style", style_name:"Title", paragraph_n:1}
-save     {action:"export", file_path:"out.odt", export_format:"odt"}
+save     {action:"export", file_path:"/abs/path/out.odt", export_format:"odt"}
 ```
+
+`save`/`picture` resolve relative paths against this checkout's root, but use
+absolute paths for anything outside it. MCP tool calls are pinned to one Wasm
+worker (`LIBREOFFICE_TARGET=node`); do not open browser tabs during headless
+work and never mix documents from `getCurrentComponent()` with the one you
+created.
 
 For anything not listed here, read §2–§4 and use `describe` before guessing.
 
@@ -292,16 +298,15 @@ model.getSheets() / getText() / getDrawPages()   # same object tree as a top-lev
 Fill it with the same calls you would use on a standalone document. Save the
 container; the nested model is stored with it.
 
-To size the OLE preview (otherwise a large object can cache a clipped one):
+`embed` sizes the OLE preview to `width_mm`/`height_mm` automatically. If you
+build the object by hand, size the **embedded model** (not the control): the
+supplier/control path throws `WrongStateException` in this build.
 
 ```
-obj      = container.getByName("Object1")
-supplier = query obj "com.sun.star.embed.XEmbeddedObjectSupplier2"
-ctl      = call supplier "getExtendedControlOverEmbeddedObject"
-visual   = query ctl "com.sun.star.embed.XVisualObject"
-call visual "setVisualAreaSize"
-     [{"$e":"com.sun.star.embed.Aspect","v":"ASPECT_CONTENT"},
-      {"$s":"com.sun.star.awt.Size","Width":16000,"Height":12000}]
+model = obj.getEmbeddedObject()
+call model "setVisualAreaSize" [4, {"$s":"com.sun.star.awt.Size","Width":16000,"Height":9500}]
+set obj "Width" 16000
+set obj "Height" 9500
 ```
 
 ### R8 — Export with options
@@ -351,12 +356,15 @@ then `insertControlCharacter(PARAGRAPH_BREAK)`.
 ### Embed a spreadsheet in Writer
 
 ```
-embed {service:"calc", width_mm:160, height_mm:95, values:[["Date","Weight (g)"],…]}
-  -> {name, clsid, object:{$h}, model:{$h}}
+embed {service:"calc", width_mm:160, height_mm:95,
+       values:[["Date","Weight (g)"],…],
+       chart:{title:"Weight", x_title:"Date", y_title:"g"}}
+  -> {name, clsid, object:{$h}, model:{$h}, values, chart, preview}
 ```
 
 It sets the GUID CLSID, anchor, size, inserts, verifies `getElementNames()`
-grew, and returns the model. Then use `model` with `uno`.
+grew, writes `values`, optionally builds `chart`, sizes the preview, and returns
+the model. Then use `model` with `uno` for anything the recipe does not cover.
 
 Raw sequence and the CLSID table are in §R1/R7; the important bits:
 
@@ -366,10 +374,35 @@ Raw sequence and the CLSID table are in §R1/R7; the important bits:
 - `getEmbeddedObject()`, not the `Model` property.
 - The OLE preview is captured at creation; set the size before inserting.
 
-### Fill an embedded sheet and add a chart
+### Embedded Calc + chart in one call (A4 fast path)
 
-Use `model` from `embed` exactly like a Calc document: `getSheets()` →
-`getByIndex(0)` → `getCellRangeByName("A1:B10")` → `setDataArray`, then §R6.
+One `execute` block does the whole task: document, text, values, chart and
+preview. Do not hand-build chart2 calls.
+
+```js
+const doc = await tools.zetaoffice.document({ action: "create", doc_type: "writer" });
+await tools.zetaoffice.text({ action: "insert",
+  content: "Quarterly Sales Report\nEmbedded spreadsheet and chart\n" });
+await tools.zetaoffice.text({ action: "style", style_name: "Title", paragraph_n: 1 });
+await tools.zetaoffice.text({ action: "style", style_name: "Subtitle", paragraph_n: 2 });
+const e = await tools.zetaoffice.embed({
+  service: "calc", width_mm: 160, height_mm: 95,
+  values: [["Quarter", "Sales (k€)"],
+           ["Q1 2025", 120], ["Q2 2025", 145], ["Q3 2025", 132],
+           ["Q4 2025", 171], ["Q1 2026", 158]],
+  chart: { title: "Sales by Quarter", x_title: "Quarter", y_title: "Sales (k€)", legend: false },
+});
+const odt = await tools.zetaoffice.save({ action: "export", file_path: "bench/out/A4/report.odt", export_format: "odt" });
+const pdf = await tools.zetaoffice.save({ action: "export", file_path: "bench/out/A4/report.pdf", export_format: "pdf" });
+return { e, odt, pdf };
+```
+
+`e.chart` reports `{name, range, type}`; `e.preview` reports the sized visual
+area. That is enough to verify the task: no unzip, `pdftoppm` or screenshots.
+The values block becomes `A1:B6` (header row + 5 data rows) and the first
+column becomes the category axis.
+
+For a standalone Calc document (not embedded), use `sheet {action:"chart"}`.
 
 ### Math formula
 

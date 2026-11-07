@@ -18,6 +18,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const LIBREOFFICE_URL = process.env.LIBREOFFICE_URL || "http://localhost:8765";
+// Pin tool calls to one Wasm host. Browser tabs reconnect asynchronously and can
+// take over mid-document; "node" keeps a session deterministic (headless work).
+const TARGET = process.env.ZETAOFFICE_TARGET || process.env.LIBREOFFICE_TARGET || "";
+
+// Relative output paths belong to the checkout, not to whatever cwd the MCP
+// client happened to launch us from.
+function resolveHostPath(p) {
+  if (!p) return p;
+  if (path.isAbsolute(p)) return p;
+  return path.resolve(process.env.ZETAOFFICE_WORKDIR || __dirname, p);
+}
 
 let bridgeProcess = null;
 
@@ -137,7 +148,11 @@ async function callLibreoffice(endpoint, method = "POST", data = {}) {
     if (method === "POST") {
       options.body = JSON.stringify(data);
     }
-    const res = await fetch(`${LIBREOFFICE_URL}${endpoint}`, options);
+    let url = `${LIBREOFFICE_URL}${endpoint}`;
+    if (TARGET && endpoint.startsWith("/tools")) {
+      url += (endpoint.includes("?") ? "&" : "?") + "target=" + encodeURIComponent(TARGET);
+    }
+    const res = await fetch(url, options);
     return await res.json();
   } catch (err) {
     return {
@@ -276,9 +291,9 @@ function persistSaveResult(result, fallbackPath) {
     return result;
   }
   try {
-    let target = result.file_path || fallbackPath;
+    let target = resolveHostPath(result.file_path || fallbackPath);
     if (!target) {
-      const dir = path.join(process.cwd(), "mcp-libre-output");
+      const dir = path.join(process.env.ZETAOFFICE_WORKDIR || __dirname, "mcp-libre-output");
       target = path.join(dir, result.filename || `document.${result.format || "odt"}`);
     }
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -653,10 +668,12 @@ server.tool(
 - anchor: "inline" (as character, default) or "paragraph".
 - values: optional 2-D array written into the embedded Calc model (first sheet).
 
-Returns {name, clsid, object: {$h}, model: {$h}, values}. Use the model handle
-with the uno tool (call/get/set) to fill cells, add charts, etc. The OLE
-preview is captured when the object is created; resizing the frame later only
-stretches it.`,
+Returns {name, clsid, object: {$h}, model: {$h}, values, chart?}. For an
+embedded Calc sheet, pass chart to add a real chart in the same call; the
+embedded model and its preview area are sized to the frame for you.
+
+chart fields: title, x_title, y_title, legend (default true), range (defaults
+to the values block), name, and x/y/width/height in 1/100 mm.`,
   {
     service: z.enum(["calc", "writer", "impress", "draw", "math"]).optional()
       .describe("Embedded document type (default calc)"),
@@ -664,15 +681,28 @@ stretches it.`,
     height_mm: z.number().optional().describe("Frame height in millimetres"),
     anchor: z.enum(["inline", "paragraph"]).optional().describe("Anchor mode (default inline)"),
     values: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))).optional()
-      .describe("Optional 2-D array written into the embedded Calc sheet")
+      .describe("Optional 2-D array written into the embedded Calc sheet"),
+    chart: z.object({
+      title: z.string().optional(),
+      x_title: z.string().optional(),
+      y_title: z.string().optional(),
+      legend: z.boolean().optional(),
+      range: z.string().optional().describe("Data range, default A1:<last value cell>"),
+      name: z.string().optional(),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      width: z.number().optional(),
+      height: z.number().optional()
+    }).optional().describe("Add a chart inside the embedded Calc sheet in the same call")
   },
-  async ({ service, width_mm, height_mm, anchor, values }) => {
+  async ({ service, width_mm, height_mm, anchor, values, chart }) => {
     return jsonResponse(await callLibreoffice("/tools/insert_embedded_object_live", "POST", {
       service: service || "calc",
       width_mm,
       height_mm,
       anchor: anchor === "paragraph" ? "paragraph" : "as_char",
-      values
+      values,
+      chart
     }));
   }
 );
@@ -1057,12 +1087,13 @@ save(export, export_format:"odt"|"docx"|"pdf").`,
     if (action !== "insert") return toolError(action, `Invalid action '${action}'.`, "Valid actions: insert.");
     if (!file_path) return toolError(action, "Missing 'file_path'.", "Pass a path, e.g. picture.png.");
     let bytes;
+    const resolved = resolveHostPath(file_path);
     try {
-      bytes = fs.readFileSync(file_path);
+      bytes = fs.readFileSync(resolved);
     } catch (err) {
       return toolError(action, `Cannot read '${file_path}': ${err.message}`, "Pass a local png/jpg/gif/bmp path.");
     }
-    const ext = (path.extname(file_path).replace(/^\./, '') || 'png').toLowerCase();
+    const ext = (path.extname(resolved).replace(/^\./, '') || 'png').toLowerCase();
     const data = { image_base64: bytes.toString('base64'), image_type: ext, display };
     if (width_cm !== undefined) data.width_cm = width_cm;
     if (height_cm !== undefined) data.height_cm = height_cm;

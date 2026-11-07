@@ -42,12 +42,26 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
    fresh tab, or target `?target=node` for headless work.
 10. **One client, one document.** Keep the handle returned by `create`/`load`;
     `getCurrentComponent()` may be a different open document.
+11. **Paths belong to the checkout.** `save`/`picture` resolve relative paths
+    against the repo root; prefer absolute paths. Never search `/` for output.
+12. **Pin headless runs to the node runtime.** Set `LIBREOFFICE_TARGET=node`
+    (already in the MCP config). Do not open browser tabs during headless work;
+    a reconnecting tab can take over the session mid-document.
+13. **Embedded sheet + chart is one call.** Use
+    `embed {values, chart:{title,x_title,y_title}}`; it also sizes the OLE
+    preview. Do not hand-build chart2, and do not use the failed
+    supplier/control `setVisualAreaSize` path.
+14. **Verify with tool reads, not artifacts.** Read state back
+    (`structure`, `sheet read`, `embed` counts). Do not unzip packages, run
+    `pdftoppm`, or inspect screenshots to find out what happened.
 
 ## Benchmark discipline
 
 - One **fresh agent/session per prompt**. Never reuse context or prior results.
 - Reset between runs: `node scripts/bench.mjs reset <id>` (cleans output,
   restarts the bridge).
+- Follow the matching cookbook fast path verbatim (for embedded Calc + chart
+  that is the A4 recipe). No filesystem spelunking, no image inspection.
 - Freeze the toolset: verify the running MCP server has the current tools
   (`cookbook`, `bridge`, `embed`, `uno`) before starting; otherwise the run is
   invalid.
