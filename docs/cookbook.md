@@ -507,6 +507,23 @@ await tools.zetaoffice.save({ action: "export", file_path: "out/chart.xlsx", exp
 `sheet {action:"chart"}` targets the active Calc document and uses the first
 column as category labels. No UNO is needed for the basic chart.
 
+For a **date axis**, store column A as real dates with a date number format,
+create the chart, then switch the X axis type with `set_enum` and read it back:
+
+```js
+const chart = (await U({ op: "call", h: charts, name: "getByName",
+  args: ["Chart1"] })).value.$h;
+const obj = (await U({ op: "call", h: chart, name: "getEmbeddedObject" })).value.$h;
+const diagram = (await U({ op: "call", h: obj, name: "getDiagram" })).value.$h;
+const axis = (await U({ op: "call", h: diagram, name: "getXAxis" })).value.$h;
+await U({ op: "set_enum", h: axis, name: "AxisType", value: 2 }); // DATE
+const type = (await U({ op: "get", h: axis, name: "AxisType" })).value; // 2
+```
+
+Use `sheet {action:"chart"}` first to create the chart; `charts` is
+`sheet.getCharts()`. `AxisType` is an enum whose type name is not registered,
+so `set_enum` is required; `set` silently leaves it at 0 (categories).
+
 ### Page setup: landscape, margins, header and page-number footer
 
 Page setup lives on a page **style**; header/footer are XText objects on it.
