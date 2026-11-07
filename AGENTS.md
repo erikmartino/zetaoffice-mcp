@@ -76,6 +76,15 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
     (`structure`, `sheet read`, `embed` counts). Do not unzip packages, run
     `pdftoppm`, or inspect screenshots to find out what happened.
 
+21. **Dates and pictures have high-level paths.** `sheet.write` converts ISO
+    `YYYY-MM-DD` strings to real date cells (pass `parse_dates:false` to keep
+    text), so charts get date axes without UNO serials. `picture` preserves the
+    aspect ratio when given one dimension and accepts `paragraph_n`/`at`; use
+    it instead of moving the cursor after `text.style`.
+22. **`text.style` must not move the shared cursor.** Paragraph styling uses a
+    local cursor; if a later insert lands in the styled paragraph, that is a
+    regression, not a reason to add cursor workarounds.
+
 ## Benchmark discipline
 
 - **Task-solving first.** Recipes must generalize: no prompt-specific values,

@@ -574,8 +574,9 @@ server.tool(
   `Read and write cells in the active Calc spreadsheet and add charts.
 
 - read(range, sheet?): 2-D array of values for a range like "A1:B10".
-- write(values, start?, sheet?): write a 2-D array of rows; numbers stay numbers,
-  and strings starting with "=" become real formulas.
+- write(values, start?, sheet?, parse_dates?): write a 2-D array of rows;
+  numbers stay numbers, strings starting with "=" become real formulas, and
+  ISO dates (YYYY-MM-DD) become real date cells unless parse_dates is false.
 - format(range, bold?, italic?, font_size?, align?, fill_color?, number_format?,
   sheet?): number_format is currency, percent, date, number, integer, or a
   custom format code.
@@ -601,6 +602,7 @@ doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
     start: z.string().optional().describe("Top-left cell for 'write' (default 'A1')"),
     values: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))).optional()
       .describe("2-D array of rows (for 'write')"),
+    parse_dates: z.boolean().optional().describe("Treat ISO YYYY-MM-DD strings as real dates (default true)"),
     bold: z.boolean().optional().describe("Bold text (for 'format')"),
     italic: z.boolean().optional().describe("Italic text (for 'format')"),
     font_size: z.number().optional().describe("Font size in points (for 'format')"),
@@ -630,7 +632,7 @@ doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
     rows: z.number().int().optional().describe("Rows to freeze (for 'freeze')"),
     name: z.string().optional().describe("Sheet or named-range name")
   },
-  async ({ action, sheet, range, start, values, bold, italic, font_size, align,
+  async ({ action, sheet, range, start, values, parse_dates, bold, italic, font_size, align,
            fill_color, number_format, data_sheet, column, width_mm, data_range,
            chart_type, title, x_title, y_title, legend, x, y, width, height,
            date_axis, type, source, show_list, new_name, index, columns, rows, name }) => {
@@ -641,7 +643,9 @@ doc_type:"calc"}. Chart positions and sizes are in 1/100 mm.`,
       if (!Array.isArray(values) || !values.length) {
         return toolError(action, "Missing 'values'.", "Pass a 2-D array of rows, e.g. [[\"Date\",\"Weight\"],[\"2026-01-01\",1500]].");
       }
-      return jsonResponse(await callLibreoffice("/tools/set_cells_live", "POST", { values, start: start || "A1", sheet }));
+      return jsonResponse(await callLibreoffice("/tools/set_cells_live", "POST", {
+        values, start: start || "A1", sheet, parse_dates
+      }));
     } else if (action === "format") {
       if (!range) return toolError(action, "Missing 'range'.", 'Pass a range like "A1:B1".');
       return jsonResponse(await callLibreoffice("/tools/format_range_live", "POST", {
@@ -831,6 +835,9 @@ whole document.`,
       } else {
         text = `No section matching '${topic}'. Sections:\n` +
           (text.match(/^#{2,3}\\s+.*$/gm) || []).join("\n");
+      }
+      if (/formula/i.test(topic) && !/Math formula/.test(text)) {
+        text = 'For a native Writer Math object, use cookbook {topic:"math"}.\n\n' + text;
       }
     }
     return { content: [{ type: "text", text }] };
@@ -1151,6 +1158,33 @@ n-ary limits there.`,
   }
 );
 
+function imageDimensions(bytes) {
+  try {
+    if (bytes.length > 24 && bytes.toString("ascii", 1, 4) === "PNG") {
+      return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+    }
+    if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+      let i = 2;
+      while (i + 9 < bytes.length) {
+        if (bytes[i] !== 0xff) { i++; continue; }
+        const marker = bytes[i + 1];
+        if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+          return { height: bytes.readUInt16BE(i + 5), width: bytes.readUInt16BE(i + 7) };
+        }
+        const len = bytes.readUInt16BE(i + 2);
+        i += 2 + len;
+      }
+    }
+    if (bytes.toString("ascii", 0, 3) === "GIF") {
+      return { width: bytes.readUInt16LE(6), height: bytes.readUInt16LE(8) };
+    }
+    if (bytes.toString("ascii", 0, 2) === "BM") {
+      return { width: Math.abs(bytes.readInt32LE(18)), height: Math.abs(bytes.readInt32LE(22)) };
+    }
+  } catch (err) { /* unsupported/broken header */ }
+  return null;
+}
+
 // =============================================================================
 // CONSOLIDATED TOOL 11: picture
 // Actions: insert (inline graphic object from a local file)
@@ -1159,23 +1193,27 @@ server.tool(
   "picture",
   `Insert a raster picture into the document.
 
-- insert(file_path, width_cm?, height_cm?, display?, align?): load a local
-  png/jpg/gif/bmp file on the MCP server's filesystem and insert it as a real
-  inline graphic (com.sun.star.text.TextGraphicObject).
+- insert(file_path, width_cm?, height_cm?, display?, align?, paragraph_n?, at?):
+  load a local png/jpg/gif/bmp file on the MCP server's filesystem and insert
+  it as a real inline graphic (com.sun.star.text.TextGraphicObject).
   display (default true) puts it on its own paragraph; align is
-  left|center|right. Sizes are in centimetres (default 5 x 5).
+  left|center|right. Give one size to preserve the image aspect ratio (default
+  width 5 cm). paragraph_n inserts at the start/end of that paragraph instead of
+  the current cursor; at is start|end (default end).
 
 The image bytes are embedded in the document on export; use
 save(export, export_format:"odt"|"docx"|"pdf").`,
   {
     action: z.enum(["insert"]).describe("Operation to perform"),
     file_path: z.string().optional().describe("Local image path (png/jpg/gif/bmp) for 'insert'"),
-    width_cm: z.number().optional().describe("Display width in centimetres (default 5)"),
-    height_cm: z.number().optional().describe("Display height in centimetres (default 5)"),
+    width_cm: z.number().optional().describe("Display width in centimetres (default 5, or derived from height/aspect ratio)"),
+    height_cm: z.number().optional().describe("Display height in centimetres (default derived from width/aspect ratio)"),
     display: z.boolean().default(true).describe("Put the picture on its own paragraph"),
-    align: z.enum(["left", "center", "right"]).optional().describe("Paragraph alignment for a displayed picture")
+    align: z.enum(["left", "center", "right"]).optional().describe("Paragraph alignment for a displayed picture"),
+    paragraph_n: z.number().int().optional().describe("Insert at this paragraph (1-indexed) instead of the current cursor"),
+    at: z.enum(["start", "end"]).optional().describe("Picture position within the paragraph (default end)")
   },
-  async ({ action, file_path, width_cm, height_cm, display, align }) => {
+  async ({ action, file_path, width_cm, height_cm, display, align, paragraph_n, at }) => {
     if (action !== "insert") return toolError(action, `Invalid action '${action}'.`, "Valid actions: insert.");
     if (!file_path) return toolError(action, "Missing 'file_path'.", "Pass a path, e.g. picture.png.");
     let bytes;
@@ -1187,9 +1225,21 @@ save(export, export_format:"odt"|"docx"|"pdf").`,
     }
     const ext = (path.extname(resolved).replace(/^\./, '') || 'png').toLowerCase();
     const data = { image_base64: bytes.toString('base64'), image_type: ext, display };
-    if (width_cm !== undefined) data.width_cm = width_cm;
-    if (height_cm !== undefined) data.height_cm = height_cm;
+    const dims = imageDimensions(bytes);
+    let width = width_cm;
+    let height = height_cm;
+    if (dims && dims.width > 0 && dims.height > 0) {
+      if (width === undefined && height === undefined) width = 5;
+      if (width === undefined) width = height * dims.width / dims.height;
+      if (height === undefined) height = width * dims.height / dims.width;
+      if (width !== undefined) width = Math.round(width * 100) / 100;
+      if (height !== undefined) height = Math.round(height * 100) / 100;
+    }
+    if (width !== undefined) data.width_cm = width;
+    if (height !== undefined) data.height_cm = height;
     if (align) data.align = align;
+    if (paragraph_n !== undefined) data.paragraph_n = paragraph_n;
+    if (at) data.at = at;
     return jsonResponse(await callLibreoffice("/tools/insert_picture_live", "POST", data));
   }
 );

@@ -666,16 +666,31 @@ function base64ToBytes(b64) {
 function insertPicture(doc, imageBytes, ext, opts) {
   const options = opts || {};
   const textObj = doc.getText();
-  const cursor = textObj.createTextCursor();
-  try {
-    if (editCursor) cursor.gotoRange(editCursor, false);
-    else cursor.gotoEnd(false);
-    cursor.collapseToEnd();
-  } catch (e) {
-    cursor.gotoEnd(false);
+  let cursor;
+  let pos;
+  if (options.paragraph_n) {
+    const ranges = getParagraphRanges(doc);
+    const idx = Number(options.paragraph_n) - 1;
+    if (idx < 0 || idx >= ranges.length) {
+      throw new Error(`Paragraph ${options.paragraph_n} out of range: document has ${ranges.length} paragraph(s)`);
+    }
+    pos = String(options.at || 'end').toLowerCase() === 'start'
+      ? ranges[idx].start : ranges[idx].end;
+    cursor = textObj.createTextCursor();
+    cursor.gotoStart(false);
+    if (pos > 0) cursor.goRight(pos, false);
+  } else {
+    cursor = textObj.createTextCursor();
+    try {
+      if (editCursor) cursor.gotoRange(editCursor, false);
+      else cursor.gotoEnd(false);
+      cursor.collapseToEnd();
+    } catch (e) {
+      cursor.gotoEnd(false);
+    }
+    pos = editCursorStart;
   }
-  const hadFollowingText = editCursorStart < textObj.getString().length;
-  let pos = editCursorStart;
+  const hadFollowingText = pos < textObj.getString().length;
 
   // The URL fallback is optional: bytes go through SequenceInputStream below.
   // A worker without a writable FS (browser tab) must not fail the insert.
@@ -964,12 +979,31 @@ function toArray(seq) {
   try { return Array.from(seq); } catch (e) { return []; }
 }
 
-function writeGrid(range, values) {
+function writeGrid(range, values, doc, options) {
+  const opts = options || {};
   const width = Math.max(1, ...values.map((r) => (Array.isArray(r) ? r.length : 1)));
-  const grid = values.map((row) => {
+  const dateCells = [];
+  const isoDate = (v) => {
+    if (opts.parse_dates === false || typeof v !== 'string') return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+    const utc = Date.UTC(y, mo - 1, d);
+    if (!Number.isFinite(utc)) return null;
+    return Math.floor(utc / 86400000) + 25569; // 1899-12-30 epoch
+  };
+  const grid = values.map((row, r) => {
     const cells = Array.isArray(row) ? row.slice() : [row];
     while (cells.length < width) cells.push('');
-    return cells.map((v) => (v === null || v === undefined) ? '' : v);
+    return cells.map((v, c) => {
+      if (v === null || v === undefined) return '';
+      const serial = isoDate(v);
+      if (serial !== null) {
+        dateCells.push({ row: r, col: c });
+        return serial;
+      }
+      return v;
+    });
   });
   range.setDataArray(grid);
   // setDataArray stores "=..." as text; promote those cells to real formulas.
@@ -981,7 +1015,17 @@ function writeGrid(range, values) {
       }
     }
   }
-  return { rows: grid.length, cols: width };
+  if (dateCells.length && doc && typeof doc.getNumberFormats === 'function') {
+    const locale = new css.lang.Locale({ Language: 'en', Country: 'US' });
+    const formats = doc.getNumberFormats();
+    let key = formats.queryKey('YYYY-MM-DD', locale, true);
+    if (key === -1) key = formats.addNew('YYYY-MM-DD', locale);
+    for (const cell of dateCells) {
+      setUnoProp(range.getCellByPosition(cell.col, cell.row), 'NumberFormat',
+        Module.uno_Type.Long(), key);
+    }
+  }
+  return { rows: grid.length, cols: width, dates: dateCells.length };
 }
 
 function columnLetters(index) {
@@ -2208,7 +2252,7 @@ zHT.thrPort.onmessage = (event) => {
         const height = Math.max(1, params.values.length);
         const width = Math.max(1, ...params.values.map((r) => (Array.isArray(r) ? r.length : 1)));
         const range = sheet.getCellRangeByPosition(col, row, col + width - 1, row + height - 1);
-        const written = writeGrid(range, params.values);
+        const written = writeGrid(range, params.values, doc, { parse_dates: params.parse_dates });
         result = {
           success: true,
           message: `Wrote ${written.rows} row(s) x ${written.cols} column(s) at ${params.start || 'A1'}`,
@@ -2417,7 +2461,7 @@ zHT.thrPort.onmessage = (event) => {
           const height = params.values.length;
           const width = Math.max(1, ...params.values.map((r) => (Array.isArray(r) ? r.length : 1)));
           const range = sheet.getCellRangeByPosition(0, 0, width - 1, Math.max(0, height - 1));
-          written = writeGrid(range, params.values);
+          written = writeGrid(range, params.values, model, { parse_dates: params.parse_dates });
         }
         let chart = null;
         if (params.chart && model) {
@@ -2728,7 +2772,9 @@ zHT.thrPort.onmessage = (event) => {
           width_cm: params.width_cm,
           height_cm: params.height_cm,
           display: params.display === undefined ? true : !!params.display,
-          align: params.align
+          align: params.align,
+          paragraph_n: params.paragraph_n,
+          at: params.at,
         });
         let size = null;
         try { const s = shape.getSize(); size = { width: s.Width, height: s.Height }; } catch (e) { size = null; }
@@ -2873,7 +2919,12 @@ zHT.thrPort.onmessage = (event) => {
           if (idx < 0 || idx >= ranges.length) {
             throw new Error(`Paragraph index ${params.paragraph_n} out of range: this document has ${ranges.length} paragraph(s), numbered from 1. Call structure {action:"count"} or structure {action:"paragraph", n} first.`);
           }
-          cursor = makeCursorRange(doc, ranges[idx].start, ranges[idx].end);
+          cursor = doc.getText().createTextCursor();
+          cursor.gotoStart(false);
+          if (ranges[idx].start > 0) cursor.goRight(ranges[idx].start, false);
+          if (ranges[idx].end > ranges[idx].start) {
+            cursor.goRight(ranges[idx].end - ranges[idx].start, true);
+          }
         } else {
           cursor = currentCursor(doc);
         }

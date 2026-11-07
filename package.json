@@ -1,6 +1,6 @@
 {
   "name": "zetaoffice-mcp",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "LibreOffice WebAssembly MCP server: Writer/Calc/Impress editing with a high-level capability layer, no desktop LibreOffice",
   "main": "server.mjs",
   "type": "module",

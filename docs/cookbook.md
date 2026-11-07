@@ -110,6 +110,9 @@ sheet    {action:"freeze", sheet:"Inputs", rows:1}
 - `format number_format` accepts `currency`, `percent`, `date`, `number`,
   `integer` or a custom code such as `#,##0.00`. It is independent of bold/
   fill/alignment, so one call can do both.
+- `write` turns ISO `YYYY-MM-DD` strings into real date cells and applies a
+  date format, so charts get a true date axis without UNO date serials. Pass
+  `parse_dates:false` to keep such strings as text.
 - `validation` writes real dropdown/list validation. **The xlsx filter
   serializes it; the ODS filter in this build does not** — export xlsx when
   validation matters.
@@ -1012,8 +1015,13 @@ Creates a real embedded Math object. Verify with `formula {action:"list"}`.
 ### Picture
 
 ```
-picture {action:"insert", file_path:"picture.png", width_cm:8, height_cm:5}
+picture {action:"insert", file_path:"picture.png", width_cm:8}
+picture {action:"insert", file_path:"logo.png", width_cm:4, paragraph_n:2, at:"end"}
 ```
+
+Give only one dimension to preserve the image aspect ratio. `paragraph_n`
+places the picture at the start/end of that paragraph instead of the current
+cursor; this is the reliable way to put it after a styled heading.
 
 ### Save, export, show in the browser
 
