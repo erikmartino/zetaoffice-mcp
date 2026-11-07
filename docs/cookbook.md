@@ -221,7 +221,12 @@ table.initialize(rows, cols)
 text.insertTextContent(cursor, table, false)      # verify getTextTables().getCount()
 cell = table.getCellByName("B2")
 cell.setString("text")  /  cell.setValue(42)
+cell.setFormula("sum<C2:C5>")                     # Writer syntax, not Calc's of:=
 ```
+
+Writer table formulas use the `ooow:` syntax (`sum<C2:C5>`, stored as
+`ooow:sum&lt;...&gt;`); Calc cells use `of:=SUM(...)`. A header + 4 data rows +
+a total row is 6 rows, not 5.
 
 Header repetition, borders and cell formats are properties on the table / cell
 range (`RepeatHeadline`, `BackColor`, `CharWeight`, …). Check with `describe`.

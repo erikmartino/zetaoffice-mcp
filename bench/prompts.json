@@ -128,7 +128,7 @@
     {
       "id": "B1",
       "group": "novel",
-      "prompt": "Create bench/out/B1/table.odt: a Writer document with a 5x3 table (Item, Qty, Price), fill 4 data rows, and a total row whose Price cell sums the column. Export the ODT.",
+      "prompt": "Create bench/out/B1/table.odt: a Writer document with a 3-column table (Item, Qty, Price), a header row, 4 data rows, and a total row whose Price cell sums the column. Export the ODT.",
       "output_dir": "bench/out/B1",
       "checks": [
         "native table",

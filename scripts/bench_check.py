@@ -161,7 +161,7 @@ def check_b1(d):
     return [
         ("odt exists", bool(odt), odt),
         ("native table", "<table:table" in xml, ""),
-        ("total formula", "of:=" in xml and "sum" in xml.lower(), ""),
+        ("total formula", "ooow:sum" in xml or "sum&lt;" in xml or "of:=" in xml, ""),
     ]
 
 
