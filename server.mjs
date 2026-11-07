@@ -112,12 +112,78 @@ function startUrpTcpServer(port) {
 
 function getActiveClient() {
   const arr = Array.from(connectedClients).filter((c) => c.readyState === 1);
-  // Prefer the in-process Node runtime when it is connected: browser tabs cache
-  // office_thread.js and can keep serving an older worker after a restart.
+  // Prefer a visible, booted browser tab: the point of open_browser is that the
+  // user watches MCP edits render on the canvas. The headless Node runtime is
+  // only a fallback for autonomous runs with no browser attached.
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].__isBrowser && arr[i].__officeReady) return arr[i];
+  }
   for (let i = arr.length - 1; i >= 0; i--) {
     if (arr[i].__isNodeRuntime) return arr[i];
   }
   return arr.length ? arr[arr.length - 1] : null;
+}
+
+function getReadyBrowserClient() {
+  const arr = Array.from(connectedClients).filter((c) => c.readyState === 1);
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].__isBrowser && arr[i].__officeReady) return arr[i];
+  }
+  return null;
+}
+
+function getNodeRuntimeClient() {
+  const arr = Array.from(connectedClients).filter((c) => c.readyState === 1);
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].__isNodeRuntime) return arr[i];
+  }
+  return null;
+}
+
+// Send one MCP tool call to one specific Wasm host and await its reply.
+function requestOnClient(target, tool, params, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    if (!target || target.readyState !== 1) {
+      reject(new Error('Target Wasm session is not connected'));
+      return;
+    }
+    const reqId = 'sync_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+    const timeout = setTimeout(() => {
+      pendingRequests.delete(reqId);
+      reject(new Error(`Timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    pendingRequests.set(reqId, { resolve, reject, timeout, responded: false });
+    target.send(JSON.stringify({ type: 'mcp_request', id: reqId, tool, params }));
+  });
+}
+
+// Mirror the canonical document from the headless Node runtime into a browser
+// tab that just became ready. Without this, "create a document, then open the
+// browser" would show an empty welcome page because the Wasm instances are
+// independent.
+async function syncDocumentToBrowser(browserWs) {
+  if (!browserWs || browserWs.__isNodeRuntime) return;
+  const node = getNodeRuntimeClient();
+  if (!node) return;
+  try {
+    const info = await requestOnClient(node, 'get_document_info_live', {}, 15000).catch(() => null);
+    if (info && info.character_count === 0) return;
+    const type = (info && info.type) || 'writer';
+    const format = { writer: 'odt', calc: 'ods', impress: 'odp', draw: 'odg' }[type] || 'odt';
+    const exported = await requestOnClient(node, 'export_document_live', { format }, 25000);
+    if (!exported || !exported.data) {
+      console.log('[Sync] No document data from the Node runtime; skipping mirror');
+      return;
+    }
+    const loaded = await requestOnClient(browserWs, 'load_document_live', { data: exported.data, format }, 30000);
+    if (loaded && loaded.success) {
+      console.log(`[Sync] Mirrored ${exported.bytes || 0} bytes into the browser tab (${type})`);
+    } else {
+      console.log('[Sync] Browser could not display the mirrored document:', loaded && loaded.error);
+    }
+  } catch (e) {
+    console.log('[Sync] Mirror skipped:', e.message);
+  }
 }
 
 // Find Chrome/Chromium executable on the current OS
@@ -356,15 +422,37 @@ const server = http.createServer(async (req, res) => {
 
   // Trigger desktop browser window
   if ((pathname === '/tools/open_browser_live' || pathname === '/open_browser') && (req.method === 'POST' || req.method === 'GET')) {
-    const url = `http://localhost:${PORT}`;
-    const opened = openDesktopBrowser(url);
+    const baseUrl = `http://localhost:${PORT}`;
+    // Wait briefly for an already-open tab to finish booting; otherwise open a
+    // fresh one. The cache-busting query makes desktop browsers create a new tab
+    // even when the plain URL is already open in a stale one.
+    let waited = 0;
+    while (waited < 6000 && !getReadyBrowserClient()) {
+      await new Promise((r) => setTimeout(r, 250));
+      waited += 250;
+    }
+    const alreadyConnected = !!getReadyBrowserClient();
+    let opened = true;
+    const url = alreadyConnected ? baseUrl : `${baseUrl}/?t=${Date.now()}`;
+    if (!alreadyConnected) opened = openDesktopBrowser(url);
+    while (waited < 26000 && !getReadyBrowserClient()) {
+      await new Promise((r) => setTimeout(r, 250));
+      waited += 250;
+    }
+    const browserConnected = !!getReadyBrowserClient();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       success: opened,
-      message: opened ? `Opened ${url} in your desktop browser` : `Failed to launch desktop browser for ${url}`,
-      url,
+      message: opened
+        ? (browserConnected
+            ? `Opened ${baseUrl} in your desktop browser`
+            : `Launched ${baseUrl}; waiting for the browser tab to finish booting`)
+        : `Failed to launch desktop browser for ${baseUrl}`,
+      url: baseUrl,
       mode: IS_HEADLESS ? 'headless' : 'browser',
-      browser_connected: !!getActiveClient()
+      browser_connected: browserConnected,
+      browser_already_open: alreadyConnected,
+      waited_ms: waited
     }));
     return;
   }
@@ -438,7 +526,8 @@ const server = http.createServer(async (req, res) => {
         pendingRequests.set(reqId, { resolve, reject, timeout, responded: false });
       });
 
-      // Dispatch to active (most recent) Wasm session
+      // Dispatch to the active (most recent) Wasm session
+      console.log(`[MCP] ${toolName} -> ${client.__isNodeRuntime ? 'node runtime' : client.__isBrowser ? 'browser tab' : 'client'}`);
       client.send(JSON.stringify({
         type: 'mcp_request',
         id: reqId,
@@ -529,8 +618,26 @@ wss.on('connection', (ws, req) => {
     try {
       const data = JSON.parse(message.toString());
       if (data.type === 'ready') {
-        if (data.runtime === 'node') ws.__isNodeRuntime = true;
+        if (data.runtime === 'node') {
+          ws.__isNodeRuntime = true;
+        } else {
+          ws.__isBrowser = true;
+          // A tab running an older cached page never reports office_ready.
+          // Nudge it to reload once so it picks up the current bridge code.
+          setTimeout(() => {
+            if (ws.readyState === 1 && !ws.__officeReady) {
+              try { ws.send(JSON.stringify({ type: 'reload' })); } catch (e) { /* ignore */ }
+            }
+          }, 15000);
+        }
         console.log(`[ZetaJS] ZetaOffice UNO Engine ready in browser: ${data.info || 'OK'}`);
+      } else if (data.type === 'office_ready') {
+        ws.__isBrowser = true;
+        ws.__officeReady = true;
+        console.log(`[ZetaJS] Browser Wasm worker ready: ${data.info || 'OK'}${data.reconnect ? ' (reconnect)' : ''}`);
+        // Only push the canonical document into freshly booted tabs: a tab that
+        // merely reconnected already holds its own (possibly edited) document.
+        if (!data.reconnect) syncDocumentToBrowser(ws);
       } else if (data.type === 'mcp_response') {
         const pending = pendingRequests.get(data.id);
         if (pending && !pending.responded) {

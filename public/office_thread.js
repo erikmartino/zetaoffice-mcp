@@ -541,6 +541,21 @@ function getFilterName(docType, format) {
   return map[format] || null;
 }
 
+// Import filters for load_document_live (the inverse of FILTER_MAP).
+const IMPORT_FILTER_MAP = {
+  odt: 'writer8', ott: 'writer8',
+  docx: 'MS Word 2007 XML', doc: 'MS Word 97', rtf: 'Rich Text Format',
+  txt: 'Text (encoded)', html: 'HTML (StarWriter)', htm: 'HTML (StarWriter)',
+  ods: 'calc8', xlsx: 'Calc MS Excel 2007 XML', xls: 'MS Excel 97',
+  csv: 'Text - txt - csv (StarCalc)',
+  odp: 'impress8', pptx: 'Impress MS PowerPoint 2007 XML', ppt: 'MS PowerPoint 97',
+  odg: 'draw8',
+};
+
+function getImportFilterName(format) {
+  return IMPORT_FILTER_MAP[String(format || '').toLowerCase()] || null;
+}
+
 function sanitizeFilename(name) {
   const cleaned = (name || 'document').replace(/[^\w.\-]+/g, '_').replace(/^[_.]+|[_.]+$/g, '');
   return cleaned || 'document';
@@ -1343,6 +1358,94 @@ zHT.thrPort.onmessage = (event) => {
         currentDocTitle = `Untitled ${type.charAt(0).toUpperCase() + type.slice(1)}`;
         resetTypingAttributes(xModel);
         result = { success: true, message: `Created new ${type} document via ZetaJS UNO`, doc_type: type };
+        break;
+      }
+
+      case 'load_document_live': {
+        // Replace the document shown on the canvas with bytes supplied by the
+        // bridge (base64). Used to push the canonical document from the Node
+        // runtime into a freshly connected browser tab.
+        const format = String(params.format || 'odt').toLowerCase().replace(/^\./, '');
+        const filterName = getImportFilterName(format);
+        if (!filterName) throw new Error(`Unsupported document format '${format}'`);
+
+        if (!params.path && (typeof params.data !== 'string' || !params.data)) {
+          throw new Error("load_document_live requires base64 'data' or a 'path' in the shared filesystem");
+        }
+
+        const FS = (Module && (Module.__FS || Module.FS)) || (zHT && zHT.FS) || globalThis.FS;
+        if (!FS || typeof FS.writeFile !== 'function') {
+          throw new Error('Wasm filesystem is not available for loading');
+        }
+
+        let bytes = null;
+        if (typeof params.data === 'string' && params.data) {
+          if (typeof Buffer !== 'undefined') {
+            bytes = Buffer.from(params.data, 'base64');
+          } else {
+            const bin = atob(params.data);
+            bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          }
+        }
+
+        let fsPath = params.path ? String(params.path) : `/tmp/live_${Date.now()}.${format}`;
+        let written = 0;
+        if (!params.path) {
+          try { FS.mkdir('/tmp'); } catch (e) { /* already exists */ }
+          FS.writeFile(fsPath, bytes);
+          try { written = FS.readFile(fsPath).length; } catch (e) { written = -1; }
+        } else {
+          written = bytes ? bytes.length : -1;
+        }
+
+        const PropertyValue = css.beans.PropertyValue;
+        const props = [
+          new PropertyValue({ Name: 'FilterName', Handle: 0, Value: filterName }),
+          new PropertyValue({ Name: 'Hidden', Handle: 0, Value: false }),
+          new PropertyValue({ Name: 'ReadOnly', Handle: 0, Value: false }),
+          new PropertyValue({ Name: 'Silent', Handle: 0, Value: true }),
+        ];
+
+        const prev = getDoc();
+        let loaded = null;
+        let lastErr = null;
+        for (const target of ['_default', '_blank', '_self']) {
+          try {
+            loaded = zHT.desktop.loadComponentFromURL('file://' + fsPath, target, 0, props);
+          } catch (e) {
+            lastErr = e;
+            loaded = null;
+          }
+          console.log(`[ZetaJS Worker] load_document_live target=${target} -> ${loaded ? 'ok' : 'null'}${lastErr ? ' err=' + lastErr.message : ''}`);
+          if (loaded) break;
+        }
+        if (!loaded) {
+          throw new Error(`LibreOffice could not open the supplied document (${format}, ${bytes ? bytes.length : '?'} bytes, fs=${written})${lastErr ? ': ' + lastErr.message : ''}`);
+        }
+        try { FS.unlink(fsPath); } catch (e) { /* best effort */ }
+
+        xModel = loaded;
+        currentDocType = (format === 'odp' || format === 'pptx' || format === 'ppt') ? 'impress'
+          : (format === 'ods' || format === 'xlsx' || format === 'xls' || format === 'csv') ? 'calc'
+          : format === 'odg' ? 'draw' : 'writer';
+        try {
+          const docProps = loaded.getDocumentProperties();
+          if (docProps && docProps.Title) currentDocTitle = String(docProps.Title);
+        } catch (e) { /* title is optional */ }
+
+        // Keep the canvas bound to a single frame: dispose of the previous one.
+        if (prev && prev !== loaded) {
+          try { prev.close(false); } catch (e) { /* leave it open if it refuses */ }
+        }
+
+        result = {
+          success: true,
+          message: `Loaded ${format} document into the live canvas`,
+          doc_type: currentDocType,
+          title: currentDocTitle,
+          bytes: bytes ? bytes.length : undefined,
+        };
         break;
       }
 

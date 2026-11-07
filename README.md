@@ -212,7 +212,16 @@ Even if started in headless mode, you can control the browser directly from your
   ```json
   document(action="open_browser")
   ```
-  This immediately launches `http://localhost:8765` in your system's desktop browser.
+  This launches `http://localhost:8765` in your system's desktop browser. The
+  call waits until the tab's Wasm worker is booted, and the bridge mirrors the
+  current document from the headless runtime into that tab, so a document that
+  was generated *before* the browser opened appears unchanged on the canvas.
+  From then on every MCP call is routed to the visible tab (the headless runtime
+  stays as a fallback when no browser is attached).
+
+  A page that reconnects after a bridge restart re-announces itself as ready, so
+  it keeps receiving edits instead of silently falling back to the headless
+  runtime. Tabs running an out-of-date cached page are asked to reload once.
 
 - **Check Current Mode & Health**:
   Ask your assistant *"Check LibreOffice status"*.

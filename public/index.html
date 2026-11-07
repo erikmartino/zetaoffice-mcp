@@ -322,6 +322,24 @@
     // 1. Setup WebSocket to local Node server
     let ws = null;
     let zHM = null;
+    // Requests that arrived before the Wasm worker finished booting. The
+    // bridge dispatches as soon as the WebSocket connects, which can be a few
+    // seconds before office_thread.js is running; queue instead of dropping.
+    const pendingMcp = [];
+
+    function flushPendingMcp() {
+      if (!zHM || !zHM.thrPort || !pendingMcp.length) return;
+      while (pendingMcp.length) {
+        const msg = pendingMcp.shift();
+        zHM.thrPort.postMessage({
+          cmd: 'mcp_exec',
+          id: msg.id,
+          tool: msg.tool,
+          params: msg.params
+        });
+        log('MCP', 'mcp', `Delivered queued call: <b>${msg.tool}</b>`);
+      }
+    }
 
     function connectWebSocket() {
       const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -332,6 +350,15 @@
         wsDot.className = 'dot green';
         wsText.textContent = 'Bridge Connected';
         log('WS', 'sys', 'WebSocket connected to Node.js MCP server');
+        // After a bridge restart the page reconnects but the Wasm worker is
+        // already running, so re-announce readiness: without this the bridge
+        // would fall back to the headless Node runtime and edits would stop
+        // showing on this canvas.
+        if (zHM && zHM.thrPort) {
+          try {
+            ws.send(JSON.stringify({ type: 'office_ready', info: 'ZetaOffice Wasm worker already running', reconnect: true }));
+          } catch (e) { /* ignore */ }
+        }
       };
 
       ws.onclose = () => {
@@ -362,9 +389,43 @@
             if (zHM && zHM.thrPort) zHM.thrPort.postMessage({ cmd: 'urp_open', id: msg.id });
           } else if (msg.type === 'urp_close') {
             if (zHM && zHM.thrPort) zHM.thrPort.postMessage({ cmd: 'urp_close', id: msg.id });
+          } else if (msg.type === 'reload') {
+            // The bridge detected an out-of-date page; reload once or twice at
+            // most so a boot failure cannot turn into a reload loop.
+            const reloads = Number(sessionStorage.getItem('zetaReloads') || '0');
+            if (reloads < 2) {
+              sessionStorage.setItem('zetaReloads', String(reloads + 1));
+              log('SYS', 'sys', 'Reloading to pick up the current bridge code...');
+              location.reload();
+            }
           } else if (msg.type === 'mcp_request') {
             log('MCP', 'mcp', `Incoming HTTP call: <b>${msg.tool}</b>`);
-            // Forward to Wasm worker thread
+            // Documents are staged on the main thread: that is the filesystem
+            // LibreOffice itself sees. The office pthread has a separate FS.
+            if (msg.tool === 'load_document_live' && msg.params && msg.params.data) {
+              try {
+                const FS = zHM && zHM.FS;
+                if (!FS || typeof FS.writeFile !== 'function') throw new Error('Wasm filesystem not ready');
+                const fmt = String(msg.params.format || 'odt').toLowerCase();
+                try { FS.mkdir('/tmp'); } catch (e) { /* exists */ }
+                const fsPath = `/tmp/live_${Date.now()}.${fmt}`;
+                FS.writeFile(fsPath, base64ToBytes(msg.params.data));
+                msg.params = Object.assign({}, msg.params, { path: fsPath });
+                delete msg.params.data;
+                console.log('[Bridge] Staged document at ' + fsPath + ' (' + (msg.params.format || 'odt') + ')');
+                log('MCP', 'sys', `Staged document at ${fsPath}`);
+              } catch (e) {
+                if (ws && ws.readyState === 1) {
+                  ws.send(JSON.stringify({
+                    type: 'mcp_response',
+                    id: msg.id,
+                    result: { success: false, error: `Could not stage document: ${e.message}` }
+                  }));
+                }
+                return;
+              }
+            }
+            // Forward to Wasm worker thread; queue while it is still booting.
             if (zHM && zHM.thrPort) {
               zHM.thrPort.postMessage({
                 cmd: 'mcp_exec',
@@ -373,11 +434,8 @@
                 params: msg.params
               });
             } else {
-              ws.send(JSON.stringify({
-                type: 'mcp_response',
-                id: msg.id,
-                result: { success: false, error: 'ZetaJS Worker thread not ready' }
-              }));
+              pendingMcp.push(msg);
+              log('MCP', 'sys', 'Wasm worker still booting - call queued');
             }
           } else if (msg.type === 'uno_request') {
             const uno = msg.payload || {};
@@ -429,6 +487,7 @@
     }
 
     connectWebSocket();
+    setInterval(flushPendingMcp, 250);
 
     // 2. Initialize ZetaOffice WebAssembly
     try {
@@ -448,6 +507,7 @@
         if (ws && ws.readyState === 1) {
           ws.send(JSON.stringify({ type: 'ready', info: 'ZetaOffice Wasm Ready' }));
         }
+        sessionStorage.setItem('zetaReloads', '0');
 
         // Listen for replies from office_worker.js
         const oldOnMessage = zHM.thrPort.onmessage;
@@ -497,6 +557,11 @@
             return;
           } else if (data && data.cmd === 'mcp_ready') {
             log('UNO', 'uno', data.info);
+            // Tell the bridge the Wasm worker can now accept commands so it can
+            // mirror the canonical document into this tab.
+            if (ws && ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'office_ready', info: data.info }));
+            }
             return;
           }
           if (oldOnMessage) {
