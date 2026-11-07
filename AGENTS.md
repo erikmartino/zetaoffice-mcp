@@ -63,12 +63,20 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
 
 ## Benchmark discipline
 
+- **Task-solving first.** Recipes must generalize: no prompt-specific values,
+  test IDs or output paths in the cookbook. A correct, reusable recipe beats a
+  brittle fast one.
+- **Timing is a diagnostic, not a gate.** A novel prompt may exceed 30 s; do not
+  contort the cookbook to make one known prompt fast.
+- **Do not chase engine gaps.** If something cannot serialize (e.g.
+  conditional formats), document it and move on; minutes spent reverse-
+  engineering a broken path are wasted.
 - One **fresh agent/session per prompt**. Never reuse context or prior results.
 - Reset between runs: `node scripts/bench.mjs reset <id>` (cleans output,
   restarts the bridge).
-- Follow the matching cookbook fast path verbatim (for embedded Calc + chart
-  that is the A4 recipe). Its responses are the verification; extra `uno` reads
-  to re-check charts/axes are wasted time. No filesystem spelunking, no images.
+- Follow the matching cookbook recipe; its responses are the verification.
+  Extra `uno` reads to re-check charts/axes are wasted time. No filesystem
+  spelunking, no images.
 - Freeze the toolset: verify the running MCP server has the current tools
   (`cookbook`, `bridge`, `embed`, `uno`) before starting; otherwise the run is
   invalid.

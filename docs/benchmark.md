@@ -77,6 +77,10 @@ A B-prompt over 5 minutes means: add a recipe, then re-run it as an A-prompt.
 
 ## Measurement quality
 
+Timing is a diagnostic. The primary result is whether a fresh agent can solve a
+novel task from the cookbook's patterns; do not encode prompt-specific values
+or test IDs into recipes to make a known prompt faster.
+
 A run is only valid if the environment and the grading are fixed.
 
 **Freeze the environment**

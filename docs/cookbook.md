@@ -374,42 +374,34 @@ Raw sequence and the CLSID table are in §R1/R7; the important bits:
 - `getEmbeddedObject()`, not the `Model` property.
 - The OLE preview is captured at creation; set the size before inserting.
 
-### Embedded Calc + chart in one call (A4 fast path)
+### Embedded Calc sheet with a chart (one call)
 
-One `execute` block does the whole task: document, text, values, chart and
-preview. Do not hand-build chart2 calls.
+`embed` can write a value block, add a chart and size the OLE preview in one
+call. Replace the example labels, numbers and output paths.
 
 ```js
 const doc = await tools.zetaoffice.document({ action: "create", doc_type: "writer" });
+const h = doc.handle.$h;
 await tools.zetaoffice.text({ action: "insert",
-  content: "Quarterly Sales Report\nEmbedded spreadsheet and chart\n" });
-await tools.zetaoffice.text({ action: "style", style_name: "Title", paragraph_n: 1 });
-await tools.zetaoffice.text({ action: "style", style_name: "Subtitle", paragraph_n: 2 });
+  content: "Report title\nSupporting line\n" });
 const e = await tools.zetaoffice.embed({
   service: "calc", width_mm: 160, height_mm: 95,
-  values: [["Quarter", "Sales (k€)"],
-           ["Q1 2025", 120], ["Q2 2025", 145], ["Q3 2025", 132],
-           ["Q4 2025", 171], ["Q1 2026", 158]],
-  chart: { title: "Sales by Quarter", x_title: "Quarter", y_title: "Sales (k€)", legend: false },
+  values: [["Label", "Value"], ["A", 10], ["B", 20], ["C", 15], ["D", 30], ["E", 25]],
+  chart: { title: "Values by label", x_title: "Label", y_title: "Value", legend: false },
 });
-const odt = await tools.zetaoffice.save({ action: "export", file_path: "bench/out/A4/report.odt", export_format: "odt" });
-const pdf = await tools.zetaoffice.save({ action: "export", file_path: "bench/out/A4/report.pdf", export_format: "pdf" });
-return { e, odt, pdf };
+await tools.zetaoffice.save({ action: "export", file_path: "out/embedded.odt", export_format: "odt" });
+await tools.zetaoffice.save({ action: "export", file_path: "out/embedded.pdf", export_format: "pdf" });
+return e;
 ```
 
-That is the whole task. **The responses are the verification**:
-`e.values = {rows:6, cols:2}`, `e.chart = {name, range:"A1:B6", type:"column"}`,
-`e.preview = {width:~15800, height:~9500}`, and both saves report a byte count.
-Report those and stop — do **not** call `uno` to re-read the sheet, chart type,
-axes or diagram, and do not unzip/render/screenshot anything. The first column
-of the values block is the category axis; the header row is the series name.
+`e.values` reports the written block, `e.chart` the chart name/range/type and
+`e.preview` the visual area. The first column becomes the category axis and the
+header row the series name. That is sufficient verification for this pattern.
 
-For a standalone Calc document (not embedded), use `sheet {action:"chart"}`.
+### Writer table with a computed total
 
-### Writer table with a sum formula (B1 fast path)
-
-`document {action:"create"}` returns `handle: {$h}`. Use it directly for UNO;
-do not crawl root → ServiceManager → Desktop → getCurrentComponent.
+Use `document.handle` for UNO. The number of rows and the sum range are yours;
+this example uses a header, four data rows and a total row.
 
 ```js
 const U = (o) => tools.zetaoffice.uno(o);
@@ -434,10 +426,10 @@ const put = async (n, v) => {
 };
 
 await put("A1", "Item"); await put("B1", "Qty"); await put("C1", "Price");
-await put("A2", "Widget A"); await put("B2", 4);  await put("C2", 12.5);
-await put("A3", "Widget B"); await put("B3", 2);  await put("C3", 7.25);
-await put("A4", "Widget C"); await put("B4", 10); await put("C4", 3.99);
-await put("A5", "Widget D"); await put("B5", 1);  await put("C5", 45);
+await put("A2", "Row 1"); await put("B2", 1); await put("C2", 10);
+await put("A3", "Row 2"); await put("B3", 2); await put("C3", 20);
+await put("A4", "Row 3"); await put("B4", 3); await put("C4", 30);
+await put("A5", "Row 4"); await put("B5", 4); await put("C5", 40);
 await put("A6", "Total");
 
 const total = await cell("C6");
@@ -446,59 +438,60 @@ const value = (await U({ op: "call", h: total, name: "getValue" })).value;
 const tables = (await U({ op: "call", h, name: "getTextTables" })).value.$h;
 const count = (await U({ op: "call", h: tables, name: "getCount" })).value;
 
-await tools.zetaoffice.save({ action: "export",
-  file_path: "bench/out/B1/table.odt", export_format: "odt" });
+await tools.zetaoffice.save({ action: "export", file_path: "out/table.odt", export_format: "odt" });
 return { count, value };
 ```
 
-Six rows = header + 4 data rows + total. The total formula syntax is `sum<C2:C5>`
-(accepted as a real Writer formula, `ooow:sum` in the ODT). The save response
-and `count`/`value` are the verification; do not re-read cells afterwards.
+The total formula uses Writer syntax `sum<C2:C5>`; adjust the range to the data
+rows. `value` and `count` are the verification.
 
-### Calc header: bold, widths, freeze (A6 fast path)
+### Calc: header formatting, column widths and freeze
 
 ```js
 const U = (o) => tools.zetaoffice.uno(o);
 const doc = await tools.zetaoffice.document({ action: "create", doc_type: "calc" });
+const h = doc.handle.$h;
 await tools.zetaoffice.sheet({ action: "write", values: [
-  ["Product", "Region", "Units", "Unit Price", "Revenue"],
-  ["Widget", "EU", 120, 4.5, "=C2*D2"],
+  ["Col A", "Col B", "Col C"],
+  ["x", 1, 10], ["y", 2, 20], ["z", 3, 30],
 ] });
-await tools.zetaoffice.sheet({ action: "format", range: "A1:E1", bold: true });
-await tools.zetaoffice.sheet({ action: "column_width", column: "A", width_mm: 42 });
-const ctl = (await U({ op: "call", h: doc.handle.$h, name: "getCurrentController" })).value.$h;
+await tools.zetaoffice.sheet({ action: "format", range: "A1:C1", bold: true });
+await tools.zetaoffice.sheet({ action: "column_width", column: "A", width_mm: 40 });
+await tools.zetaoffice.sheet({ action: "column_width", column: "B", width_mm: 25 });
+
+const ctl = (await U({ op: "call", h, name: "getCurrentController" })).value.$h;
 const fz = (await U({ op: "query", h: ctl, iface: "com.sun.star.sheet.XViewFreezable" })).value.$h;
 await U({ op: "call", h: fz, name: "freezeAtPosition", args: [0, 1] });
 const frozen = (await U({ op: "get", h: ctl, name: "HasFrozenPanes" })).value;
-await tools.zetaoffice.save({ action: "export",
-  file_path: "bench/out/A6/table.xlsx", export_format: "xlsx" });
+await tools.zetaoffice.save({ action: "export", file_path: "out/table.xlsx", export_format: "xlsx" });
 return { frozen };
 ```
 
-`freezeAtPosition(0, 1)` freezes row 1; `HasFrozenPanes` is the verification.
+`freezeAtPosition(0, 1)` freezes the first row; `HasFrozenPanes` confirms it.
+Use one `column_width` call per column.
 
-### Calc line chart (A2 fast path)
+### Calc: data series with a line chart
 
 ```js
 const doc = await tools.zetaoffice.document({ action: "create", doc_type: "calc" });
 await tools.zetaoffice.sheet({ action: "write", values: [
-  ["Date", "Weight (g)"], ["2026-10-05", 68.2], ["2026-10-12", 68.9],
-  ["2026-10-19", 69.4], ["2026-10-26", 70.1], ["2026-11-02", 70.6],
+  ["Date", "Value"],
+  ["2026-01-05", 10], ["2026-01-12", 12], ["2026-01-19", 15],
+  ["2026-01-26", 14], ["2026-02-02", 18],
 ] });
 await tools.zetaoffice.sheet({ action: "format", range: "A1:B1", bold: true });
 await tools.zetaoffice.sheet({ action: "chart", chart_type: "line",
-  data_range: "A1:B6", title: "Weekly Weight" });
-await tools.zetaoffice.save({ action: "export",
-  file_path: "bench/out/A2/weights.xlsx", export_format: "xlsx" });
+  data_range: "A1:B6", title: "Value over time" });
+await tools.zetaoffice.save({ action: "export", file_path: "out/chart.xlsx", export_format: "xlsx" });
 ```
 
-`sheet {action:"chart"}` works on the active Calc document and turns the first
-column into category labels. No UNO is needed for the basic line chart.
+`sheet {action:"chart"}` targets the active Calc document and uses the first
+column as category labels. No UNO is needed for the basic chart.
 
-### Landscape, margins, header and page-number footer (B2 fast path)
+### Page setup: landscape, margins, header and page-number footer
 
-Page setup is a page **style** property set; header/footer are XText objects on
-that style. Use `value:` (not `v:`) for these properties.
+Page setup lives on a page **style**; header/footer are XText objects on it.
+Use `value:` for these properties.
 
 ```js
 const U = (o) => tools.zetaoffice.uno(o);
@@ -516,41 +509,36 @@ for (const [name, value] of [
 
 const ht = (await U({ op: "call", h: style, name: "getPropertyValue", args: ["HeaderText"] })).value.$h;
 const hc = (await U({ op: "call", h: ht, name: "createTextCursor" })).value.$h;
-await U({ op: "call", h: ht, name: "insertString", args: [{ $h: hc }, "Confidential", false] });
-await U({ op: "set", h: hc, name: "ParaAdjust", value: { $e: "com.sun.star.style.ParagraphAdjust", v: "CENTER" } });
-await U({ op: "set", h: hc, name: "CharWeight", value: { $f: 150 } });
+await U({ op: "call", h: ht, name: "insertString", args: [{ $h: hc }, "HEADER TEXT", false] });
 
 const ft = (await U({ op: "call", h: style, name: "getPropertyValue", args: ["FooterText"] })).value.$h;
 const fc = (await U({ op: "call", h: ft, name: "createTextCursor" })).value.$h;
 await U({ op: "call", h: ft, name: "insertString", args: [{ $h: fc }, "Page ", false] });
-const field = (await U({ op: "call", h, name: "createInstance", args: ["com.sun.star.text.TextField.PageNumber"] })).value.$h;
+const field = (await U({ op: "call", h, name: "createInstance",
+  args: ["com.sun.star.text.TextField.PageNumber"] })).value.$h;
 await U({ op: "set", h: field, name: "NumberingType", value: 4 });
-await U({ op: "call", h: ft, name: "insertTextContent", args: [{ $h: fc }, { $h: field }, false] });
-await U({ op: "set", h: fc, name: "ParaAdjust", value: { $e: "com.sun.star.style.ParagraphAdjust", v: "CENTER" } });
+await U({ op: "call", h: ft, name: "insertTextContent",
+  args: [{ $h: fc }, { $h: field }, false] });
 
-await tools.zetaoffice.text({ action: "insert", content: "Benchmark Report\nBody text.\n" });
-await tools.zetaoffice.text({ action: "style", style_name: "Title", paragraph_n: 1 });
-await tools.zetaoffice.save({ action: "export", file_path: "bench/out/B2/report.odt", export_format: "odt" });
-await tools.zetaoffice.save({ action: "export", file_path: "bench/out/B2/report.pdf", export_format: "pdf" });
+await tools.zetaoffice.text({ action: "insert", content: "Body text.\n" });
+await tools.zetaoffice.save({ action: "export", file_path: "out/layout.odt", export_format: "odt" });
+await tools.zetaoffice.save({ action: "export", file_path: "out/layout.pdf", export_format: "pdf" });
 return { landscape: (await U({ op: "get", h: style, name: "IsLandscape" })).value };
 ```
 
-Margins and page size are in 1/100 mm (1.5 cm = 1500). Verify by reading
-`IsLandscape`, `Width`/`Height` and the header/footer strings; do not inspect
-the PDF.
+Lengths are in 1/100 mm (1.5 cm = 1500). Read back `IsLandscape`,
+`Width`/`Height` and the header/footer strings as verification.
 
-### Track changes with UNO (B5 fast path)
+### Track changes with UNO
 
-The high-level `track_changes` tool is a stub. Use the model flag and redlines:
+The high-level `track_changes` tool is a stub. Drive the model and redlines:
 
 ```js
 const U = (o) => tools.zetaoffice.uno(o);
 const doc = await tools.zetaoffice.document({ action: "create", doc_type: "writer" });
 const h = doc.handle.$h;
 await tools.zetaoffice.text({ action: "insert", content:
-  "The quarterly report is ready for review.\n" +
-  "All figures have been verified by the finance team.\n" +
-  "The report will be published next Monday.\n" });
+  "First sentence stays.\\nSecond sentence will change.\\nThird sentence stays.\\n" });
 
 await U({ op: "set", h, name: "RecordChanges", value: true });
 const p2 = await tools.zetaoffice.structure({ action: "paragraph", n: 2 });
@@ -559,34 +547,29 @@ const cur = (await U({ op: "call", h: text, name: "createTextCursor" })).value.$
 await U({ op: "call", h: cur, name: "gotoStart", args: [false] });
 await U({ op: "call", h: cur, name: "goRight", args: [p2.start, false] });
 await U({ op: "call", h: cur, name: "goRight", args: [p2.end - p2.start, true] });
-await U({ op: "call", h: cur, name: "setString",
-  args: ["All figures were verified by the finance team."] });
+await U({ op: "call", h: cur, name: "setString", args: ["The replacement sentence."] });
 
-const q = (await U({ op: "query", h,
-  iface: "com.sun.star.document.XRedlinesSupplier" })).value.$h;
+const q = (await U({ op: "query", h, iface: "com.sun.star.document.XRedlinesSupplier" })).value.$h;
 const coll = (await U({ op: "call", h: q, name: "getRedlines" })).value.$h;
 const pending = (await U({ op: "call", h: coll, name: "getCount" })).value;
 
-const helper = (await U({ op: "create",
-  service: "com.sun.star.frame.DispatchHelper" })).value.$h;
+const helper = (await U({ op: "create", service: "com.sun.star.frame.DispatchHelper" })).value.$h;
 const ctrl = (await U({ op: "call", h, name: "getCurrentController" })).value.$h;
 const frame = (await U({ op: "call", h: ctrl, name: "getFrame" })).value.$h;
-const dp = (await U({ op: "query", h: frame,
-  iface: "com.sun.star.frame.XDispatchProvider" })).value.$h;
+const dp = (await U({ op: "query", h: frame, iface: "com.sun.star.frame.XDispatchProvider" })).value.$h;
 await U({ op: "call", h: helper, name: "executeDispatch",
   args: [{ $h: dp }, ".uno:AcceptAllTrackedChanges", "_self", 0, []] });
 
 const remaining = (await U({ op: "call", h: coll, name: "getCount" })).value;
 await U({ op: "set", h, name: "RecordChanges", value: false });
-await tools.zetaoffice.save({ action: "export",
-  file_path: "bench/out/B5/changes.odt", export_format: "odt" });
+await tools.zetaoffice.save({ action: "export", file_path: "out/tracked.odt", export_format: "odt" });
 return { pending, remaining };
 ```
 
-`pending > 0` and `remaining === 0` are the verification. Do not read
-`RedlineText`/`RedlineDescription` (not properties on this build).
+`pending > 0` then `remaining === 0` is the verification. Do not read
+`RedlineText`/`RedlineDescription` (not exposed here).
 
-### Footnote and annotation comment (B6 fast path)
+### Footnote and annotation comment
 
 The `comments` tool is a stub; a real comment is a `TextField.Annotation`.
 
@@ -594,9 +577,7 @@ The `comments` tool is a stub; a real comment is a `TextField.Annotation`.
 const U = (o) => tools.zetaoffice.uno(o);
 const doc = await tools.zetaoffice.document({ action: "create", doc_type: "writer" });
 const h = doc.handle.$h;
-await tools.zetaoffice.text({ action: "insert", content:
-  "The quarterly report is ready for internal review.\n" +
-  "All figures were verified by the finance team.\n" });
+await tools.zetaoffice.text({ action: "insert", content: "First paragraph.\\nSecond paragraph.\\n" });
 
 const p1 = await tools.zetaoffice.structure({ action: "paragraph", n: 1 });
 const text = (await U({ op: "call", h, name: "getText" })).value.$h;
@@ -609,13 +590,12 @@ const foot = (await U({ op: "call", h, name: "createInstance",
 await U({ op: "call", h: text, name: "insertTextContent",
   args: [{ $h: cur }, { $h: foot }, false] });
 
-const fns = (await U({ op: "query", h,
-  iface: "com.sun.star.text.XFootnotesSupplier" })).value.$h;
+const fns = (await U({ op: "query", h, iface: "com.sun.star.text.XFootnotesSupplier" })).value.$h;
 const coll = (await U({ op: "call", h: fns, name: "getFootnotes" })).value.$h;
 const fn = (await U({ op: "call", h: coll, name: "getByIndex", args: [0] })).value.$h;
 const fcur = (await U({ op: "call", h: fn, name: "createTextCursor" })).value.$h;
-await U({ op: "call", h: fn, name: "insertString", args: [{ $h: fcur },
-  "Figures cross-checked against the ledger export.", false] });
+await U({ op: "call", h: fn, name: "insertString",
+  args: [{ $h: fcur }, "Footnote text.", false] });
 
 const p2 = await tools.zetaoffice.structure({ action: "paragraph", n: 2 });
 const c2 = (await U({ op: "call", h: text, name: "createTextCursor" })).value.$h;
@@ -626,30 +606,29 @@ const ann = (await U({ op: "call", h, name: "createInstance",
   args: ["com.sun.star.text.TextField.Annotation"] })).value.$h;
 await U({ op: "set", h: ann, name: "Author", value: "Reviewer" });
 await U({ op: "set", h: ann, name: "Initials", value: "RV" });
-await U({ op: "set", h: ann, name: "Content", value: "Please confirm sign-off." });
+await U({ op: "set", h: ann, name: "Content", value: "Comment text." });
 await U({ op: "call", h: text, name: "insertTextContent",
   args: [{ $h: c2 }, { $h: ann }, false] });
 
 const fnCount = (await U({ op: "call", h: coll, name: "getCount" })).value;
-await tools.zetaoffice.save({ action: "export",
-  file_path: "bench/out/B6/notes.odt", export_format: "odt" });
+await tools.zetaoffice.save({ action: "export", file_path: "out/notes.odt", export_format: "odt" });
 return { fnCount };
 ```
 
-Footnote text is inserted through the footnote's own text cursor. The
-annotation field count/Author/Content are the comment verification.
+The footnote text is inserted through the footnote's own text cursor. The
+annotation's `Content`/`Author` and the footnote count are the verification.
 
-### DRAFT watermark (B10 fast path)
+### Text watermark
 
-`document create` clears text but **not** drawing-page shapes, so clear the
-page first. Keep the watermark horizontal: rotated text is visually fine but
-`pdftotext` splits it into single letters, which fails text-based checks.
+`document create` clears text but not drawing-page shapes, so clear the page
+first. Keep the text horizontal: rotated text is visually fine but
+`pdftotext` splits it into single letters.
 
 ```js
 const U = (o) => tools.zetaoffice.uno(o);
 const doc = await tools.zetaoffice.document({ action: "create", doc_type: "writer" });
 const h = doc.handle.$h;
-await tools.zetaoffice.text({ action: "insert", content: "Draft Document\nBody text.\n" });
+await tools.zetaoffice.text({ action: "insert", content: "Body text.\\n" });
 const pages = (await U({ op: "call", h, name: "getDrawPages" })).value.$h;
 const page = (await U({ op: "call", h: pages, name: "getByIndex", args: [0] })).value.$h;
 for (let i = (await U({ op: "call", h: page, name: "getCount" })).value - 1; i >= 0; i--) {
@@ -663,7 +642,7 @@ await U({ op: "call", h: shape, name: "setSize",
   args: [{ $s: "com.sun.star.awt.Size", Width: 18000, Height: 4000 }] });
 await U({ op: "call", h: shape, name: "setPosition",
   args: [{ $s: "com.sun.star.awt.Point", X: 2000, Y: 3000 }] });
-await U({ op: "call", h: shape, name: "setString", args: ["DRAFT"] });
+await U({ op: "call", h: shape, name: "setString", args: ["WATERMARK"] });
 for (const [name, value] of Object.entries({
   CharHeight: { $f: 60 }, CharWeight: { $f: 150 }, CharColor: 12500670,
   TextAutoGrowHeight: false, TextAutoGrowWidth: false, TextWordWrap: false,
@@ -671,10 +650,13 @@ for (const [name, value] of Object.entries({
 })) await U({ op: "set", h: shape, name, value });
 await U({ op: "set", h: shape, name: "ZOrder", value: 0 });
 
-await tools.zetaoffice.save({ action: "export", file_path: "bench/out/B10/draft.odt", export_format: "odt" });
-await tools.zetaoffice.save({ action: "export", file_path: "bench/out/B10/draft.pdf", export_format: "pdf" });
+await tools.zetaoffice.save({ action: "export", file_path: "out/watermarked.odt", export_format: "odt" });
+await tools.zetaoffice.save({ action: "export", file_path: "out/watermarked.pdf", export_format: "pdf" });
 return { shapes: (await U({ op: "call", h: page, name: "getCount" })).value };
 ```
+
+Replace `WATERMARK` with the required text. The page shape count is the
+verification.
 
 ### Math formula
 
