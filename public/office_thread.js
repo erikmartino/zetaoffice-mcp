@@ -1231,11 +1231,10 @@ function unoGetMember(obj, name) {
 }
 
 function unoSetMember(obj, name, raw) {
-  if (Object.prototype.hasOwnProperty.call(obj, name) && typeof obj[name] !== 'function') {
-    obj[name] = unoDecode(raw);
-    return;
-  }
-  if (typeof obj.setPropertyValue === 'function') {
+  // Prefer the UNO property setter. A ZetaJS proxy exposes many names as own
+  // properties, but assigning them directly silently no-ops (e.g. ParaStyleName
+  // on a paragraph). setPropertyValue keeps the typed Any semantics.
+  if (obj && typeof obj.setPropertyValue === 'function') {
     const any = unoToAny(raw);
     try {
       obj.setPropertyValue(name, any);
@@ -2024,6 +2023,557 @@ function storeDocumentToFs(isExport, requestedPath, requestedFormat) {
   }
 
   return { fsPath, filename, format, filterName };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deterministic layout layer.
+//
+// UNO stays the document model and the layout engine. This layer only adds the
+// things UNO does not give an agent directly:
+//   - stable, absolute paths (doc/body/p[3], doc/body/frame:chart1, ...)
+//   - undo-group batches (begin/apply/commit/rollback)
+//   - measurement (view cursor positions + shape bounds)
+//   - geometric diagnostics (inside-page, overlap, text overflow)
+//
+// It deliberately does not mirror UNO into a second document tree.
+// ─────────────────────────────────────────────────────────────────────────────
+
+let layoutRev = 0;
+let layoutTx = null;
+
+function layoutDoc() {
+  const doc = getDoc();
+  if (!doc) throw new Error('No active document available');
+  return doc;
+}
+
+// Resolve one paragraph from a text object (or a document).
+function layoutParagraph(target, n) {
+  const text = (target && typeof target.createEnumeration === 'function') ? target : target.getText();
+  if (!text) throw new Error('Path does not point at a text container');
+  const en = text.createEnumeration();
+  let count = 0;
+  while (en.hasMoreElements()) {
+    const el = en.nextElement();
+    let isParagraph = true;
+    try {
+      if (typeof el.supportsService === 'function') {
+        isParagraph = el.supportsService('com.sun.star.text.Paragraph');
+      } else if (typeof el.getText === 'function') {
+        isParagraph = true;
+      }
+    } catch (e) { isParagraph = true; }
+    if (!isParagraph) continue;
+    count += 1;
+    if (count === n) return el;
+  }
+  throw new Error(`No paragraph ${n} in this document`);
+}
+
+function layoutFindShape(container, name) {
+  if (container && typeof container.hasByName === 'function') {
+    if (container.hasByName(name)) return container.getByName(name);
+    throw new Error(`No object named '${name}'`);
+  }
+  if (container && typeof container.getCount === 'function' && typeof container.getByIndex === 'function') {
+    for (let i = 0; i < container.getCount(); i++) {
+      const shape = container.getByIndex(i);
+      try { if (String(unoGetMember(shape, 'Name')) === String(name)) return shape; } catch (e) { /* unnamed */ }
+    }
+  }
+  throw new Error(`No shape named '${name}' in this container`);
+}
+
+// Stable paths. Objects are resolved on every call; paths are the durable IDs,
+// handles are only a convenience for the generic `uno` tool.
+function layoutResolvePath(path) {
+  const raw = String(path || '').trim();
+  const parts = raw.split('/').filter(Boolean);
+  if (!parts.length || parts[0] !== 'doc') {
+    throw new Error("Layout paths start with 'doc' (e.g. doc/body/p[1], doc/body/table:Budget/row[2]/cell[3], doc/sheets[0]/cell:A1:B5)");
+  }
+  let node = layoutDoc();
+  let tableCtx = null;
+
+  for (let i = 1; i < parts.length; i++) {
+    const seg = parts[i];
+    let m;
+
+    if (seg === 'body') { node = node.getText(); continue; }
+    if (seg === 'sheets') { node = node.getSheets(); continue; }
+    if (seg === 'drawpage') {
+      node = (typeof node.getDrawPage === 'function') ? node.getDrawPage() : node.getDrawPages().getByIndex(0);
+      continue;
+    }
+    if ((m = /^drawpages\[(\d+)\]$/.exec(seg))) { node = node.getDrawPages().getByIndex(Number(m[1])); continue; }
+    if ((m = /^p\[(\d+)\]$/.exec(seg))) { node = layoutParagraph(node, Number(m[1])); continue; }
+    if ((m = /^bookmark:(.+)$/.exec(seg))) { node = layoutDoc().getBookmarks().getByName(m[1]).getAnchor(); continue; }
+    if ((m = /^frame:(.+)$/.exec(seg))) { node = layoutDoc().getTextFrames().getByName(m[1]); continue; }
+    if ((m = /^table:(.+)$/.exec(seg))) { node = layoutDoc().getTextTables().getByName(m[1]); continue; }
+    if ((m = /^image:(.+)$/.exec(seg))) { node = layoutDoc().getGraphicObjects().getByName(m[1]); continue; }
+    if ((m = /^object:(.+)$/.exec(seg))) { node = layoutDoc().getEmbeddedObjects().getByName(m[1]); continue; }
+    if ((m = /^shape:(.+)$/.exec(seg))) { node = layoutFindShape(node, m[1]); continue; }
+    if ((m = /^sheets\[(\d+)\]$/.exec(seg))) { node = node.getSheets().getByIndex(Number(m[1])); continue; }
+    if ((m = /^sheets:(.+)$/.exec(seg))) { node = node.getSheets().getByName(m[1]); continue; }
+    if ((m = /^row\[(\d+)\]$/.exec(seg))) {
+      if (typeof node.getCellByPosition !== 'function') throw new Error(`'${seg}' needs a table`);
+      tableCtx = { table: node, row: Number(m[1]) };
+      node = null;
+      continue;
+    }
+    if ((m = /^cell\[(\d+)\]$/.exec(seg))) {
+      if (!tableCtx) throw new Error(`'${seg}' needs a preceding row[n]`);
+      node = tableCtx.table.getCellByPosition(Number(m[1]) - 1, tableCtx.row - 1);
+      tableCtx = null;
+      continue;
+    }
+    if ((m = /^cell:(.+)$/.exec(seg))) { node = node.getCellRangeByName(m[1]); continue; }
+    throw new Error(`Unknown layout path segment '${seg}'`);
+  }
+
+  if (!node) throw new Error(`Path '${raw}' did not resolve to an object`);
+  return node;
+}
+
+function layoutKind(obj) {
+  if (obj && typeof obj.getPosition === 'function' && typeof obj.getSize === 'function') return 'shape';
+  if (obj && typeof obj.getRangeAddress === 'function') return 'cell-range';
+  if (obj && typeof obj.getCellByPosition === 'function') return 'table';
+  if (obj && typeof obj.getString === 'function') return 'text-range';
+  if (obj && typeof obj.getText === 'function') return 'text-container';
+  if (obj && typeof obj.getSheets === 'function') return 'document';
+  if (obj && typeof obj.getByIndex === 'function') return 'collection';
+  return 'object';
+}
+
+function layoutViewCursor(doc) {
+  const ctrl = doc.getCurrentController();
+  if (!ctrl) throw new Error('Document has no controller (no layout available)');
+  try {
+    if (typeof ctrl.getViewCursor === 'function') return ctrl.getViewCursor();
+  } catch (e) { /* fall through */ }
+  if (typeof ctrl.queryInterface === 'function') {
+    const type = Module.uno_Type.Interface('com.sun.star.text.XTextViewCursorSupplier');
+    try {
+      const supplier = ctrl.queryInterface(type);
+      if (supplier) return supplier.getViewCursor();
+    } finally { type.delete(); }
+  }
+  throw new Error('Could not obtain a view cursor for measurement');
+}
+
+function layoutPageOf(vc) {
+  try {
+    const type = Module.uno_Type.Interface('com.sun.star.text.XPageCursor');
+    try {
+      const pc = vc.queryInterface(type);
+      return pc ? Number(pc.getPage()) : null;
+    } finally { type.delete(); }
+  } catch (e) {
+    return null;
+  }
+}
+
+function layoutMeasureTextRange(doc, range) {
+  if (!range) throw new Error('Cannot measure an empty range');
+  const vc = layoutViewCursor(doc);
+  const start = (typeof range.getStart === 'function') ? range.getStart() : range;
+  const end = (typeof range.getEnd === 'function') ? range.getEnd() : range;
+
+  vc.gotoRange(start, false);
+  const p1 = vc.getPosition();
+  vc.gotoRange(end, false);
+  const p2 = vc.getPosition();
+
+  let charHeight = 12;
+  try {
+    const value = range.getPropertyValue ? range.getPropertyValue('CharHeight') : null;
+    if (value) charHeight = Number(value);
+  } catch (e) { /* default */ }
+  const line = Math.max(1, Math.round(charHeight * 35.28)); // 1 pt = 35.28 (1/100 mm)
+  const sameLine = Math.abs(Number(unoGetMember(p2, 'Y')) - Number(unoGetMember(p1, 'Y'))) < Math.max(1, Math.round(line / 2));
+
+  return {
+    x: Number(unoGetMember(p1, 'X')),
+    y: Number(unoGetMember(p1, 'Y')),
+    w: sameLine ? Math.max(0, Number(unoGetMember(p2, 'X')) - Number(unoGetMember(p1, 'X'))) : null,
+    h: Math.max(line, Number(unoGetMember(p2, 'Y')) - Number(unoGetMember(p1, 'Y')) + line),
+    page: layoutPageOf(vc),
+    basis: 'view-cursor',
+  };
+}
+
+function layoutMeasureObject(doc, path) {
+  const obj = layoutResolvePath(path);
+  const kind = layoutKind(obj);
+  let box = null;
+
+  if (typeof obj.getPosition === 'function' && typeof obj.getSize === 'function') {
+    const p = obj.getPosition();
+    const s = obj.getSize();
+    box = {
+      x: Number(unoGetMember(p, 'X')), y: Number(unoGetMember(p, 'Y')),
+      w: Number(unoGetMember(s, 'Width')), h: Number(unoGetMember(s, 'Height')),
+      page: layoutPageOf(layoutViewCursor(doc)), basis: 'shape',
+    };
+  } else if (typeof obj.getRangeAddress === 'function' && typeof doc.getSheets === 'function') {
+    const address = obj.getRangeAddress();
+    const sheet = doc.getSheets().getByIndex(Number(unoGetMember(address, 'Sheet')));
+    const startCol = Number(unoGetMember(address, 'StartColumn'));
+    const startRow = Number(unoGetMember(address, 'StartRow'));
+    const endCol = Number(unoGetMember(address, 'EndColumn'));
+    const endRow = Number(unoGetMember(address, 'EndRow'));
+    const cols = sheet.getColumns();
+    const rows = sheet.getRows();
+    let x = 0;
+    for (let i = 0; i < startCol; i++) x += Number(unoGetMember(cols.getByIndex(i), 'Width'));
+    let y = 0;
+    for (let i = 0; i < startRow; i++) y += Number(unoGetMember(rows.getByIndex(i), 'Height'));
+    let w = 0;
+    for (let i = startCol; i <= endCol; i++) w += Number(unoGetMember(cols.getByIndex(i), 'Width'));
+    let h = 0;
+    for (let i = startRow; i <= endRow; i++) h += Number(unoGetMember(rows.getByIndex(i), 'Height'));
+    box = { x, y, w, h, page: null, basis: 'cell-grid' };
+  } else if (typeof obj.getString === 'function') {
+    box = layoutMeasureTextRange(doc, obj);
+  } else if (typeof obj.getCellByPosition === 'function' && typeof obj.getAnchor === 'function') {
+    box = layoutMeasureTextRange(doc, obj.getAnchor());
+    let width = 0;
+    try {
+      const cols = obj.getColumns();
+      for (let i = 0; i < cols.getCount(); i++) width += Number(unoGetMember(cols.getByIndex(i), 'Width'));
+    } catch (e) { /* optional */ }
+    if (width) box.w = width;
+    box.basis = 'table';
+  } else if (typeof obj.getText === 'function') {
+    box = layoutMeasureTextRange(doc, obj.getText());
+    box.basis = 'text';
+  }
+
+  if (!box) throw new Error(`Cannot measure '${path}' (${kind})`);
+  return { path, kind, box, obj };
+}
+
+function layoutPageFormat(doc) {
+  try {
+    const styles = doc.getStyleFamilies().getByName('PageStyles');
+    let name = 'Standard';
+    try {
+      const en = doc.getText().createEnumeration();
+      const first = en.nextElement();
+      const pageStyle = unoGetMember(first, 'PageStyleName');
+      if (pageStyle) name = String(pageStyle);
+    } catch (e) { /* default */ }
+    const ps = styles.getByName(name);
+    const width = Number(unoGetMember(ps, 'Width'));
+    const height = Number(unoGetMember(ps, 'Height'));
+    if (width && height) {
+      return { width, height, name };
+    }
+  } catch (e) { /* fallback */ }
+  return { width: 21000, height: 29700, name: 'A4-default' };
+}
+
+function layoutPageCount(doc) {
+  try {
+    const ctrl = doc.getCurrentController();
+    const count = unoGetMember(ctrl, 'PageCount');
+    if (count !== undefined && count !== null) return Number(count);
+  } catch (e) { /* fall through */ }
+  try {
+    if (typeof doc.getDrawPages === 'function') return doc.getDrawPages().getCount();
+  } catch (e) { /* fall through */ }
+  return 1;
+}
+
+function layoutHash(doc) {
+  const chunks = [];
+  if (doc && typeof doc.getText === 'function') {
+    chunks.push(getParagraphRanges(doc).map((r) => `${r.style || ''}\u0000${r.text}`).join('\u0001'));
+  }
+  if (doc && typeof doc.getSheets === 'function') {
+    const sheets = doc.getSheets();
+    for (let i = 0; i < sheets.getCount(); i++) {
+      const sheet = sheets.getByIndex(i);
+      let part = `sheet:${unoGetMember(sheet, 'Name')}`;
+      try {
+        const cursor = sheet.createCursor();
+        cursor.gotoStartOfUsedArea(false);
+        cursor.gotoEndOfUsedArea(true);
+        const address = cursor.getRangeAddress();
+        const range = sheet.getCellRangeByPosition(
+          Number(unoGetMember(address, 'StartColumn')), Number(unoGetMember(address, 'StartRow')),
+          Number(unoGetMember(address, 'EndColumn')), Number(unoGetMember(address, 'EndRow')));
+        part += ':' + JSON.stringify(unoEncode(range.getDataArray()));
+      } catch (e) {
+        part += ':unreadable';
+      }
+      chunks.push(part);
+    }
+  }
+  if (doc && typeof doc.getDrawPages === 'function') {
+    chunks.push(`slides:${doc.getDrawPages().getCount()}`);
+  }
+  chunks.push(`pages:${layoutPageCount(doc)}`);
+  let hash = 2166136261;
+  const source = chunks.join('\u0002');
+  for (let i = 0; i < source.length; i++) {
+    hash ^= source.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ('00000000' + (hash >>> 0).toString(16)).slice(-8);
+}
+
+function layoutMeasurePaths(doc, paths) {
+  return (paths || []).map((path) => {
+    const measured = layoutMeasureObject(doc, path);
+    return { path: measured.path, kind: measured.kind, box: measured.box, obj: measured.obj };
+  });
+}
+
+function layoutBoxOverlap(a, b) {
+  if (!a || !b || a.w === null || b.w === null) return false;
+  const left = Math.max(a.x, b.x);
+  const right = Math.min(a.x + a.w, b.x + b.w);
+  const top = Math.max(a.y, b.y);
+  const bottom = Math.min(a.y + a.h, b.y + b.h);
+  return right - left > 1 && bottom - top > 1;
+}
+
+function layoutCheck(doc, options) {
+  const opts = options || {};
+  const paths = Array.isArray(opts.paths) ? opts.paths : [];
+  const measured = layoutMeasurePaths(doc, paths);
+  const page = layoutPageFormat(doc);
+  const tol = Number(opts.tolerance === undefined ? 50 : opts.tolerance);
+  const diagnostics = [];
+
+  if (opts.inside_page !== false) {
+    for (const m of measured) {
+      const b = m.box;
+      const outsideX = b.x < -tol || (b.w !== null && b.x + b.w > page.width + tol);
+      const outsideY = b.y < -tol || b.y + b.h > page.height + tol;
+      if (outsideX || outsideY) {
+        diagnostics.push({
+          kind: 'outside_page', path: m.path,
+          box: b, page, suggestion: 'Move the object inside the page or change the page size.',
+        });
+      }
+    }
+  }
+
+  if (opts.no_overlap !== false) {
+    const allowed = new Set();
+    for (const pair of (opts.allow_overlap || [])) {
+      if (Array.isArray(pair) && pair.length === 2) {
+        allowed.add(`${pair[0]}|${pair[1]}`);
+        allowed.add(`${pair[1]}|${pair[0]}`);
+      }
+    }
+    for (let i = 0; i < measured.length; i++) {
+      for (let j = i + 1; j < measured.length; j++) {
+        const a = measured[i];
+        const b = measured[j];
+        if (allowed.has(`${a.path}|${b.path}`)) continue;
+        if (a.box.page !== null && b.box.page !== null && a.box.page !== b.box.page) continue;
+        if (layoutBoxOverlap(a.box, b.box)) {
+          diagnostics.push({
+            kind: 'overlap', path: a.path, with: b.path,
+            suggestion: 'Reposition one of the objects, or declare the overlap in allow_overlap.',
+          });
+        }
+      }
+    }
+  }
+
+  if (opts.text_fits) {
+    for (const m of measured) {
+      const obj = m.obj;
+      if (!obj || typeof obj.getText !== 'function' || typeof obj.getSize !== 'function') continue;
+      const textBox = layoutMeasureTextRange(doc, obj.getText());
+      const size = obj.getSize();
+      if (textBox.h > Number(size.Height) + tol) {
+        diagnostics.push({
+          kind: 'text_overflow', path: m.path,
+          required_height: textBox.h, available_height: Number(size.Height),
+          suggestion: 'Enlarge the container or reduce the text.',
+        });
+      }
+    }
+  }
+
+  return {
+    success: true,
+    ok: diagnostics.length === 0,
+    rev: layoutRev,
+    page,
+    page_count: layoutPageCount(doc),
+    hash: layoutHash(doc),
+    boxes: measured.map(({ path, kind, box }) => ({ path, kind, box })),
+    diagnostics,
+  };
+}
+
+function layoutApply(doc, ops) {
+  if (!Array.isArray(ops) || !ops.length) throw new Error("apply needs a non-empty 'ops' array");
+  const results = [];
+
+  for (const op of ops) {
+    if (!op || !op.path) throw new Error("Every op needs a 'path'");
+    const target = layoutResolvePath(op.path);
+    const action = String(op.op || 'set').toLowerCase();
+
+    if (action === 'set') {
+      if (!op.values || typeof op.values !== 'object') throw new Error("set op needs 'values'");
+      for (const [name, raw] of Object.entries(op.values)) {
+        unoSetMember(target, name, raw);
+        let readback = null;
+        try { readback = unoEncode(unoGetMember(target, name)); } catch (e) { /* not readable */ }
+        results.push({ path: op.path, op: 'set', name, readback });
+        if (layoutTx) layoutTx.dirty = true;
+      }
+    } else if (action === 'call') {
+      if (!op.method) throw new Error("call op needs 'method'");
+      const fn = target[op.method];
+      if (typeof fn !== 'function') throw new Error(`'${op.method}' is not a method on '${op.path}'`);
+      const value = fn.apply(target, (op.args || []).map(unoDecode));
+      results.push({ path: op.path, op: 'call', method: op.method, value: unoEncode(value) });
+      if (layoutTx) layoutTx.dirty = true;
+    } else if (action === 'insert_text') {
+      let text = null;
+      let cursor = null;
+      if (typeof target.getRangeAddress === 'function' && typeof target.getText === 'function') {
+        // Calc cell: append to the cell's text.
+        text = target.getText();
+        cursor = text.createTextCursor();
+        cursor.gotoEnd(false);
+      } else if (typeof target.getString === 'function' && typeof target.getEnd === 'function') {
+        // Writer text range (paragraph, bookmark, selection): append to the range.
+        text = doc.getText();
+        cursor = text.createTextCursorByRange(target.getEnd());
+        cursor.collapseToEnd();
+      } else if (typeof target.getText === 'function') {
+        // Text frame or document container.
+        text = target.getText();
+        cursor = text.createTextCursor();
+        cursor.gotoEnd(false);
+      } else {
+        text = doc.getText();
+        cursor = text.createTextCursorByRange(target);
+        cursor.collapseToEnd();
+      }
+      text.insertString(cursor, String(op.text === undefined ? '' : op.text), false);
+      results.push({ path: op.path, op: 'insert_text', chars: String(op.text || '').length });
+      if (layoutTx) layoutTx.dirty = true;
+    } else if (action === 'bookmark') {
+      results.push(layoutBookmark(doc, op.path, op.name || op.id));
+      if (layoutTx) layoutTx.dirty = true;
+    } else {
+      throw new Error(`Unknown layout op '${action}'`);
+    }
+  }
+
+  if (layoutTx && results.length) layoutTx.dirty = true;
+  return results;
+}
+
+function layoutBookmark(doc, path, name) {
+  if (!name) throw new Error("bookmark needs 'name'");
+  const target = layoutResolvePath(path);
+  if (typeof target.getPosition === 'function' && typeof target.setPropertyValue === 'function') {
+    setUnoProp(target, 'Name', Module.uno_Type.String(), String(name));
+    return { path, name, kind: 'shape' };
+  }
+  if (typeof target.getStart !== 'function') {
+    throw new Error('bookmark needs a Writer text range or a named shape/frame');
+  }
+  const bookmarks = doc.getBookmarks();
+  try { bookmarks.removeByName(String(name)); } catch (e) { /* absent */ }
+  const anchor = target.getStart();
+  const bookmark = doc.createInstance('com.sun.star.text.Bookmark');
+  bookmark.setName(String(name));
+  doc.getText().insertTextContent(anchor, bookmark, false);
+  return { path, name, kind: 'text-range' };
+}
+
+function layoutBegin() {
+  if (layoutTx) throw new Error('A layout transaction is already open; commit or rollback it first');
+  const doc = layoutDoc();
+  const undo = doc.getUndoManager ? doc.getUndoManager() : null;
+  if (!undo) throw new Error('This document has no undo manager; batches are unavailable');
+
+  undo.enterUndoContext(`layout rev ${layoutRev + 1}`);
+  layoutTx = {
+    rev: layoutRev,
+    docType: currentDocType,
+    title: currentDocTitle,
+    started: Date.now(),
+    dirty: false,
+    undo,
+    contextOpen: true,
+  };
+  return {
+    success: true, rev: layoutRev, mode: 'undo-group',
+    context: `layout rev ${layoutRev + 1}`,
+  };
+}
+
+function layoutCommit() {
+  if (!layoutTx) throw new Error('No open layout transaction');
+  const tx = layoutTx;
+  const doc = getDoc();
+  if (tx.contextOpen && tx.undo) {
+    try { tx.undo.leaveUndoContext(); } catch (e) { /* optional */ }
+    tx.contextOpen = false;
+  }
+  layoutRev += 1;
+  const hash = layoutHash(doc);
+  layoutTx = null;
+  return {
+    success: true, rev: layoutRev, hash,
+    changes: tx.dirty,
+  };
+}
+
+function layoutRollback() {
+  if (!layoutTx) throw new Error('No open layout transaction');
+  const tx = layoutTx;
+  const doc = getDoc();
+  if (tx.contextOpen && tx.undo) {
+    try { tx.undo.leaveUndoContext(); } catch (e) { /* optional */ }
+    tx.contextOpen = false;
+  }
+
+  let undone = false;
+  if (tx.dirty) {
+    try {
+      tx.undo.undo();
+      undone = true;
+    } catch (e) {
+      layoutTx = null;
+      throw new Error(`Rollback failed: ${e.message || String(e)}`);
+    }
+  }
+
+  layoutTx = null;
+  return {
+    success: true, rev: tx.rev, undone,
+    hash: doc ? layoutHash(doc) : null,
+  };
+}
+
+function layoutStatus() {
+  const doc = getDoc();
+  return {
+    success: true,
+    rev: layoutRev,
+    transaction: layoutTx
+      ? { open: true, rev: layoutTx.rev, format: layoutTx.format, bytes: layoutTx.bytes ? layoutTx.bytes.length : 0, started: layoutTx.started }
+      : { open: false },
+    page_count: doc ? layoutPageCount(doc) : null,
+    hash: doc ? layoutHash(doc) : null,
+    doc_type: currentDocType,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3164,6 +3714,60 @@ zHT.thrPort.onmessage = (event) => {
 
       case 'add_comment_live': {
         result = { success: true, message: `Added comment by ${params.author || 'Claude'}: ${params.text}` };
+        break;
+      }
+
+      // --- 8b. Deterministic layout layer ---
+      case 'layout_live': {
+        const action = String(params.action || 'status').toLowerCase();
+        if (action === 'resolve') {
+          const obj = layoutResolvePath(params.path);
+          const kind = layoutKind(obj);
+          let preview = null;
+          try {
+            if (typeof obj.getString === 'function') preview = String(obj.getString()).slice(0, 200);
+          } catch (e) { /* optional */ }
+          result = { success: true, path: params.path, kind, handle: unoPut(obj), preview };
+        } else if (action === 'begin') {
+          result = layoutBegin();
+        } else if (action === 'apply') {
+          const doc = layoutDoc();
+          try {
+            result = { success: true, rev: layoutRev, results: layoutApply(doc, params.ops) };
+          } catch (e) {
+            let rolledBack = null;
+            if (layoutTx) {
+              try { rolledBack = layoutRollback(); } catch (re) { rolledBack = { success: false, error: re.message }; }
+            }
+            throw new Error(`${e.message || e}${rolledBack ? ` (rolled back: ${rolledBack.success ? 'ok' : 'failed'})` : ''}`);
+          }
+        } else if (action === 'commit') {
+          result = layoutCommit();
+        } else if (action === 'rollback') {
+          result = layoutRollback();
+        } else if (action === 'measure') {
+          const doc = layoutDoc();
+          const paths = Array.isArray(params.paths) && params.paths.length
+            ? params.paths
+            : (params.path ? [params.path] : []);
+          if (!paths.length) throw new Error("measure needs 'paths' or 'path'");
+          const measured = layoutMeasurePaths(doc, paths);
+          result = {
+            success: true,
+            rev: layoutRev,
+            page: layoutPageFormat(doc),
+            page_count: layoutPageCount(doc),
+            boxes: measured.map(({ path, kind, box }) => ({ path, kind, box })),
+          };
+        } else if (action === 'check') {
+          result = layoutCheck(layoutDoc(), params);
+        } else if (action === 'bookmark') {
+          result = { success: true, ...layoutBookmark(layoutDoc(), params.path, params.name || params.id) };
+        } else if (action === 'status') {
+          result = layoutStatus();
+        } else {
+          throw new Error(`Unknown layout action '${action}' (resolve, begin, apply, commit, rollback, measure, check, bookmark, status)`);
+        }
         break;
       }
 

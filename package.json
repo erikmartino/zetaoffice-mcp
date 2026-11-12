@@ -1,6 +1,6 @@
 {
   "name": "zetaoffice-mcp",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "LibreOffice WebAssembly MCP server: Writer/Calc/Impress editing with a high-level capability layer, no desktop LibreOffice",
   "main": "server.mjs",
   "type": "module",
@@ -11,7 +11,10 @@
     "mcp": "node start.mjs",
     "mcp:browser": "HEADLESS=false node mcp_stdio_server.mjs",
     "start:node": "node server.mjs --node",
-    "test": "node test_client.mjs"
+    "test": "node test_client.mjs",
+    "test:layout": "node scripts/layout_smoke.mjs",
+    "test:layout:mcp": "node scripts/layout_mcp_test.mjs",
+    "test:bench": "node scripts/bench_regression.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
