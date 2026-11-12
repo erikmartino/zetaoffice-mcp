@@ -1231,11 +1231,10 @@ function unoGetMember(obj, name) {
 }
 
 function unoSetMember(obj, name, raw) {
-  if (Object.prototype.hasOwnProperty.call(obj, name) && typeof obj[name] !== 'function') {
-    obj[name] = unoDecode(raw);
-    return;
-  }
-  if (typeof obj.setPropertyValue === 'function') {
+  // Prefer the UNO property setter. A ZetaJS proxy exposes many names as own
+  // properties, but assigning them directly silently no-ops (e.g. ParaStyleName
+  // on a paragraph). setPropertyValue keeps the typed Any semantics.
+  if (obj && typeof obj.setPropertyValue === 'function') {
     const any = unoToAny(raw);
     try {
       obj.setPropertyValue(name, any);
@@ -2415,19 +2414,6 @@ function layoutCheck(doc, options) {
   };
 }
 
-// Set a UNO property with an explicitly typed Any. `unoSetMember` falls back to
-// a plain JS assignment for names that appear as own properties on the ZetaJS
-// proxy; that silently no-ops for paragraph properties, so the deterministic
-// layer always goes through setPropertyValue.
-function layoutSetProperty(obj, name, raw) {
-  if (obj && typeof obj.setPropertyValue === 'function') {
-    const any = unoToAny(raw);
-    try { obj.setPropertyValue(name, any); } finally { if (any) any.delete(); }
-    return;
-  }
-  obj[name] = unoDecode(raw);
-}
-
 function layoutApply(doc, ops) {
   if (!Array.isArray(ops) || !ops.length) throw new Error("apply needs a non-empty 'ops' array");
   const results = [];
@@ -2440,7 +2426,7 @@ function layoutApply(doc, ops) {
     if (action === 'set') {
       if (!op.values || typeof op.values !== 'object') throw new Error("set op needs 'values'");
       for (const [name, raw] of Object.entries(op.values)) {
-        layoutSetProperty(target, name, raw);
+        unoSetMember(target, name, raw);
         let readback = null;
         try { readback = unoEncode(unoGetMember(target, name)); } catch (e) { /* not readable */ }
         results.push({ path: op.path, op: 'set', name, readback });
