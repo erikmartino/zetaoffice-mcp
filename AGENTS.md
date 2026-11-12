@@ -84,6 +84,11 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
 22. **`text.style` must not move the shared cursor.** Paragraph styling uses a
     local cursor; if a later insert lands in the styled paragraph, that is a
     regression, not a reason to add cursor workarounds.
+23. **The bridge can outlive the MCP.** Each MCP process holds a lease and
+    refreshes it. `ZETA_BRIDGE_IDLE_MS` makes the bridge exit after the last
+    lease (and with no browser/UNO client); `0` keeps it running. A restarted
+    bridge is detached, so only the lease policy cleans it up. See
+    `scripts/lease_smoke.mjs`.
 
 ## Benchmark discipline
 
@@ -130,4 +135,5 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
 | `scripts/bench.mjs` | run helpers (`list`, `reset`, `start`, `stop`, `summary`) |
 | `scripts/layout_smoke.mjs` | resolver/batch/measure/rollback smoke test |
 | `scripts/layout_mcp_test.mjs` | verifies the `layout` MCP tool via a fresh stdio server |
+| `scripts/lease_smoke.mjs` | bridge lease/idle-exit and MCP heartbeat smoke test |
 | `scripts/gen-uno-index.mjs` | regenerates `public/uno-index.js` from the IDL docs |

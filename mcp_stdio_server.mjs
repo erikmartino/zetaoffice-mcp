@@ -12,6 +12,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { patchXlsxFreeze } from "./xlsx_freeze.mjs";
@@ -27,6 +28,25 @@ const freezeSpecs = new Map();
 // Pin tool calls to one Wasm host. Browser tabs reconnect asynchronously and can
 // take over mid-document; "node" keeps a session deterministic (headless work).
 const TARGET = process.env.ZETAOFFICE_TARGET || process.env.LIBREOFFICE_TARGET || "";
+
+// Every MCP process holds a lease on the bridge. The bridge can then distinguish
+// "an idle MCP still needs me" from "no MCP is running" and exit after
+// ZETA_BRIDGE_IDLE_MS when the last lease disappears. The lease is refreshed in
+// the background so a long tool call does not drop it.
+const LEASE_ID = randomUUID();
+// Recorded for diagnostics. Liveness is heartbeat-based so PID namespaces
+// (containers) cannot cause a live MCP to lose its bridge.
+const LEASE_PID = /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:|\/|$)/.test(LIBREOFFICE_URL)
+  ? process.pid
+  : undefined;
+const LEASE_HEARTBEAT_MS = Math.max(
+  1000,
+  parseInt(process.env.ZETA_BRIDGE_LEASE_HEARTBEAT_MS || "15000", 10) || 15000
+);
+let leaseTimer = null;
+let leaseActive = false;
+let leaseUnsupported = false;
+let bridgeIdleExitMs = 0;
 
 // Relative output paths belong to the checkout, not to whatever cwd the MCP
 // client happened to launch us from.
@@ -62,9 +82,86 @@ async function isWasmReady(url) {
   }
 }
 
+async function postBridgeJson(endpoint, payload = {}, timeoutMs = 2000) {
+  try {
+    const res = await fetch(`${LIBREOFFICE_URL}${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    if (!res.ok) return { ok: false, status: res.status };
+    return { ok: true, data: await res.json().catch(() => ({})) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function refreshLease() {
+  if (leaseUnsupported) return false;
+  const result = await postBridgeJson("/lease", {
+    id: LEASE_ID,
+    pid: LEASE_PID,
+    label: "mcp"
+  });
+  if (!result.ok) {
+    leaseActive = false;
+    if (result.status === 404) {
+      // Older bridge: no lease support, so leave its lifecycle unchanged.
+      leaseUnsupported = true;
+      stopLeaseHeartbeat();
+    }
+    return false;
+  }
+  leaseActive = true;
+  if (Number.isFinite(result.data?.idle_exit_ms)) {
+    bridgeIdleExitMs = result.data.idle_exit_ms;
+  }
+  return true;
+}
+
+function stopLeaseHeartbeat() {
+  if (leaseTimer) {
+    clearInterval(leaseTimer);
+    leaseTimer = null;
+  }
+}
+
+function ensureLeaseHeartbeat() {
+  if (leaseTimer || leaseUnsupported) return;
+  leaseTimer = setInterval(() => { void refreshLease(); }, LEASE_HEARTBEAT_MS);
+  // Never keep the MCP process alive just for the heartbeat.
+  leaseTimer.unref();
+}
+
+async function ensureLease() {
+  if (leaseUnsupported) return false;
+  ensureLeaseHeartbeat();
+  if (leaseActive) return true;
+  return refreshLease();
+}
+
+async function renewLease() {
+  // A restarted bridge starts with an empty lease table.
+  leaseUnsupported = false;
+  leaseActive = false;
+  ensureLeaseHeartbeat();
+  return refreshLease();
+}
+
+async function releaseLease() {
+  stopLeaseHeartbeat();
+  const wasActive = leaseActive;
+  leaseActive = false;
+  if (wasActive) {
+    await postBridgeJson("/unlease", { id: LEASE_ID, pid: LEASE_PID });
+  }
+}
+
 async function ensureBridge() {
   const isHealthy = await checkHealth(LIBREOFFICE_URL);
   if (isHealthy) {
+    await ensureLease();
     return;
   }
 
@@ -107,24 +204,46 @@ async function ensureBridge() {
     await new Promise(r => setTimeout(r, 500));
     if (await isWasmReady(LIBREOFFICE_URL)) {
       console.error(`[MCP] LibreOffice Wasm bridge is ready and connected!`);
+      await ensureLease();
       return;
     }
   }
   console.error(`[MCP] Warning: Bridge started, but Wasm runner not yet confirmed connected.`);
+  await ensureLease();
 }
 
 function cleanupBridge() {
+  stopLeaseHeartbeat();
+  leaseActive = false;
   if (bridgeProcess) {
-    try {
-      bridgeProcess.kill('SIGTERM');
-    } catch {}
+    // If the bridge has an idle-exit policy, leave it to expire on its own:
+    // other per-directory MCP processes may still be using the same bridge.
+    if (!(bridgeIdleExitMs > 0)) {
+      try {
+        bridgeProcess.kill('SIGTERM');
+      } catch {}
+    }
     bridgeProcess = null;
   }
 }
 
+let exiting = false;
+async function gracefulExit() {
+  if (exiting) return;
+  exiting = true;
+  // Best effort; the bridge also prunes dead PIDs if this request cannot land.
+  if (leaseActive) {
+    await postBridgeJson("/unlease", { id: LEASE_ID, pid: LEASE_PID });
+  }
+  stopLeaseHeartbeat();
+  leaseActive = false;
+  cleanupBridge();
+  process.exit(0);
+}
+
 process.on('exit', cleanupBridge);
-process.on('SIGINT', () => { cleanupBridge(); process.exit(0); });
-process.on('SIGTERM', () => { cleanupBridge(); process.exit(0); });
+process.on('SIGINT', () => { void gracefulExit(); });
+process.on('SIGTERM', () => { void gracefulExit(); });
 
 const server = new McpServer(
   {
@@ -868,12 +987,16 @@ server.tool(
   "bridge",
   `Manage the LibreOffice Wasm bridge process.
 
-- status: health, mode and connected sessions.
+- status: health, mode, leases and connected sessions.
 - start: spawn the bridge if it is not running, and wait until it is healthy.
 - restart: stop the bridge and start a fresh process, then wait until healthy.
   Use this after changing server.mjs, office_thread.js or other worker code -
   no kill -9 and no orphaned Wasm runtimes.
-- quit: shut the bridge down cleanly (stops the Wasm runtime too).`,
+- quit: shut the bridge down cleanly (stops the Wasm runtime too).
+
+This MCP process holds a lease on the bridge while it runs. Set
+ZETA_BRIDGE_IDLE_MS (on the MCP server) to let the bridge exit by itself after
+that many milliseconds with no live MCP leases; 0 (default) disables idle exit.`,
   {
     action: z.enum(["status", "start", "restart", "quit"]).describe("Operation to perform")
   },
@@ -894,6 +1017,8 @@ server.tool(
       const response = await callLibreoffice("/restart", "POST", {});
       await new Promise((r) => setTimeout(r, 1200));
       const healthy = await waitForBridge();
+      if (healthy) await renewLease();
+      else leaseActive = false;
       return jsonResponse({
         success: healthy,
         message: healthy ? "Bridge restarted" : "Bridge did not come back",
@@ -902,7 +1027,15 @@ server.tool(
       });
     }
     if (action === "quit") {
-      return jsonResponse(await callLibreoffice("/quit", "POST", {}));
+      await releaseLease();
+      const result = await postBridgeJson("/quit", {});
+      if (!result.ok) {
+        return jsonResponse({
+          success: false,
+          error: result.error || `Bridge returned HTTP ${result.status}`
+        });
+      }
+      return jsonResponse(result.data);
     }
     return toolError(action, `Invalid action '${action}'.`, "Valid actions: status, start, restart, quit.");
   }

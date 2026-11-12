@@ -171,6 +171,22 @@ For the interactive canvas, use `node server.mjs --browser` and open
 
 The server [`mcp_stdio_server.mjs`](mcp_stdio_server.mjs) provides **Zero-Config Auto-Boot**: if the bridge server isn't already running, `mcp_stdio_server.mjs` starts it automatically!
 
+### Bridge lifetime and idle exit
+
+The MCP process holds a lease on the bridge and refreshes it every 15 seconds. By default the bridge runs until it is stopped explicitly, so it can outlive the MCP process (especially after a `bridge restart`, which detaches it).
+
+Set `ZETA_BRIDGE_IDLE_MS` to let the bridge exit on its own after that many milliseconds with no live MCP lease:
+
+```bash
+ZETA_BRIDGE_IDLE_MS=300000 node start.mjs
+```
+
+Set it in the MCP server's `environment` so an auto-spawned bridge inherits it; a bridge that is already running keeps the value it started with.
+
+The bridge also stays alive while a browser tab or external UNO client is attached. `0` is the default and disables idle exit. Exiting discards the in-memory document; the next tool call starts a fresh runtime.
+
+A lease expires after `ZETA_BRIDGE_LEASE_TTL_MS` without a refresh (default `45000`); `ZETA_BRIDGE_LEASE_HEARTBEAT_MS` changes the MCP refresh interval (default `15000`). Keep the TTL comfortably above the heartbeat.
+
 ### 1. Claude Code CLI
 
 Add the server directly from the command line:

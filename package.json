@@ -14,6 +14,7 @@
     "test": "node test_client.mjs",
     "test:layout": "node scripts/layout_smoke.mjs",
     "test:layout:mcp": "node scripts/layout_mcp_test.mjs",
+    "test:lease": "node scripts/lease_smoke.mjs",
     "test:bench": "node scripts/bench_regression.mjs"
   },
   "dependencies": {

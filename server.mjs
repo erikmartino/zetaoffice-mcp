@@ -43,6 +43,15 @@ const AUTO_OPEN_BROWSER = process.argv.includes('--browser') ||
   process.env.AUTO_OPEN_BROWSER === 'true' ||
   process.env.AUTO_OPEN_BROWSER === '1';
 
+// MCP processes are stateless HTTP clients, so the bridge cannot infer "is any
+// MCP using me?" from sockets. Each MCP process registers a lease and refreshes
+// it while it lives; the bridge exits after ZETA_BRIDGE_IDLE_MS with no live
+// leases, no browser tab and no external UNO client. 0 (the default) keeps the
+// historical behaviour: the bridge runs until it is explicitly stopped.
+const IDLE_EXIT_MS = Math.max(0, parseInt(process.env.ZETA_BRIDGE_IDLE_MS || '0', 10) || 0);
+const LEASE_TTL_MS = Math.max(1000, parseInt(process.env.ZETA_BRIDGE_LEASE_TTL_MS || '45000', 10) || 45000);
+const LEASE_SWEEP_MS = Math.max(1000, Math.min(10000, Math.floor(IDLE_EXIT_MS / 3) || 5000));
+
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -60,6 +69,11 @@ let headlessProcess = null;
 let headlessTmpDir = null;
 const pendingRequests = new Map();
 const connectedClients = new Set();
+// Active MCP leases: id -> { pid, label, firstSeen, lastSeen }.
+const leases = new Map();
+let lastLeaseSeenAt = Date.now();
+let activeRequests = 0;
+let leaseSweepTimer = null;
 // External UNO-over-WebSocket RPC clients (kept separate from browser clients).
 const pendingUno = new Map();
 const UNO_TIMEOUT_MS = parseInt(process.env.UNO_TIMEOUT_MS || '120000', 10);
@@ -151,6 +165,67 @@ function getNodeRuntimeClient() {
     if (arr[i].__isNodeRuntime) return arr[i];
   }
   return null;
+}
+
+// ── MCP leases and idle exit ────────────────────────────────────────────────
+function isLeaseLive(lease) {
+  // The heartbeat is authoritative. Do not rely on a PID check for liveness:
+  // the MCP and bridge can sit in different PID namespaces (containers), where
+  // a correct, live MCP PID is invisible to the bridge. A dead MCP stops
+  // refreshing and expires after the TTL.
+  return Date.now() - lease.lastSeen <= LEASE_TTL_MS;
+}
+
+function liveLeaseCount() {
+  for (const [id, lease] of leases) {
+    if (!isLeaseLive(lease)) leases.delete(id);
+  }
+  return leases.size;
+}
+
+function hasInteractiveHost() {
+  if (unoWss.clients && unoWss.clients.size > 0) return true;
+  for (const client of connectedClients) {
+    // Treat anything that has not identified itself as the Node runtime as an
+    // interactive host. A browser tab is protected from the moment it connects,
+    // before its office_ready message arrives.
+    if (client.readyState === 1 && !client.__isNodeRuntime) return true;
+  }
+  return false;
+}
+
+function readJsonBody(req, limit = 16384) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > limit) {
+        reject(new Error('Request body too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => {
+      try {
+        resolve(body.trim() ? JSON.parse(body) : {});
+      } catch (e) {
+        reject(e);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function checkIdleExit() {
+  if (shuttingDown || IDLE_EXIT_MS <= 0) return;
+  const live = liveLeaseCount();
+  if (live > 0 || hasInteractiveHost() || activeRequests > 0) {
+    lastLeaseSeenAt = Date.now();
+    return;
+  }
+  if (Date.now() - lastLeaseSeenAt < IDLE_EXIT_MS) return;
+  console.log(`[Bridge] No MCP lease for ${IDLE_EXIT_MS}ms; shutting down`);
+  shutdown(false);
 }
 
 // One Wasm instance per session. Switching instances mid-document makes handles
@@ -434,6 +509,10 @@ let shuttingDown = false;
 function shutdown(restart = false) {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (leaseSweepTimer) {
+    clearInterval(leaseSweepTimer);
+    leaseSweepTimer = null;
+  }
   console.log(restart ? '[Bridge] Restarting...' : '[Bridge] Shutting down...');
   stopHeadless();
   for (const client of connectedClients) {
@@ -481,8 +560,49 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- MCP API Endpoints ---
+  // Lease registration. The MCP process calls /lease on first use and then as a
+  // heartbeat; /unlease is best effort (the bridge also prunes dead PIDs).
+  if ((pathname === '/lease' || pathname === '/unlease') && req.method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const id = String(body.id || '').trim();
+      if (!id) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: "Missing 'id'" }));
+        return;
+      }
+      if (pathname === '/unlease') {
+        leases.delete(id);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, id, leases: liveLeaseCount() }));
+        return;
+      }
+      const now = Date.now();
+      const existing = leases.get(id);
+      leases.set(id, {
+        pid: Number.isInteger(body.pid) ? body.pid : existing?.pid,
+        label: typeof body.label === 'string' ? body.label : existing?.label,
+        firstSeen: existing?.firstSeen || now,
+        lastSeen: now
+      });
+      lastLeaseSeenAt = now;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        id,
+        leases: liveLeaseCount(),
+        idle_exit_ms: IDLE_EXIT_MS
+      }));
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: e.message }));
+    }
+    return;
+  }
+
   if (pathname === '/health') {
     const client = getActiveClient();
+    const liveLeases = liveLeaseCount();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       status: 'healthy',
@@ -494,6 +614,8 @@ const server = http.createServer(async (req, res) => {
       runtime_connected: !!client,
       node_runtime: !!getNodeRuntimeClient(),
       connected_clients: connectedClients.size,
+      leases: liveLeases,
+      idle_exit_ms: IDLE_EXIT_MS,
       mode: MODE,
       headless_running: !!headlessProcess,
       commit: BUILD_COMMIT,
@@ -589,6 +711,15 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname.startsWith('/tools/') && req.method === 'POST') {
+    activeRequests += 1;
+    let requestActive = true;
+    const finishRequest = () => {
+      if (!requestActive) return;
+      requestActive = false;
+      activeRequests -= 1;
+    };
+    res.on('finish', finishRequest);
+    res.on('close', finishRequest);
     const toolName = pathname.replace('/tools/', '');
     let body = '';
     req.on('data', chunk => { body += chunk; });
@@ -877,5 +1008,11 @@ ${IS_NODE_RUNTIME ? '🟢 Node.js mode active: starting the Wasm runtime in-proc
   } else if (AUTO_OPEN_BROWSER) {
     console.log(`[Browser] Automatically launching desktop browser: ${url}`);
     openDesktopBrowser(url);
+  }
+
+  if (IDLE_EXIT_MS > 0) {
+    leaseSweepTimer = setInterval(checkIdleExit, LEASE_SWEEP_MS);
+    leaseSweepTimer.unref();
+    console.log(`[Bridge] Idle exit enabled: ${IDLE_EXIT_MS}ms after the last MCP lease (ttl ${LEASE_TTL_MS}ms)`);
   }
 });
