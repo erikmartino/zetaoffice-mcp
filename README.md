@@ -236,13 +236,19 @@ Even if started in headless mode, you can control the browser directly from your
     "status": "healthy",
     "server": "ZetaJS Wasm MCP Bridge",
     "version": "1.0.0",
-    "browser_connected": true,
+    "browser_connected": false,
+    "runtime_connected": true,
+    "node_runtime": true,
     "connected_clients": 1,
-    "mode": "headless",
+    "mode": "node",
     "headless_running": true,
     "url": "http://localhost:8765"
   }
   ```
+
+  `mode` is `node`, `headless` or `browser`. `browser_connected` is true only
+  when a browser tab is attached; the Node runtime is reported by
+  `node_runtime` and keeps `runtime_connected` true on its own.
 
 ---
 

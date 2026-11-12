@@ -54,7 +54,9 @@ async function isWasmReady(url) {
     const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(1000) });
     if (!res.ok) return false;
     const data = await res.json();
-    return data.browser_connected === true;
+    // Newer bridges report runtime_connected for Node or browser hosts. Keep the
+    // old browser_connected check as a fallback for already-running bridges.
+    return (data.runtime_connected ?? data.browser_connected) === true;
   } catch {
     return false;
   }

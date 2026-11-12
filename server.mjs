@@ -34,6 +34,10 @@ const IS_NODE_RUNTIME = process.argv.includes('--node') ||
   process.env.LOWA_NODE === '1' ||
   process.env.LOWA_NODE === 'true';
 
+// Reported by /health and the CLI banner. Node mode is not "browser" mode:
+// it runs the Wasm engine in worker_threads and needs no Chrome at all.
+const MODE = IS_NODE_RUNTIME ? 'node' : IS_HEADLESS ? 'headless' : 'browser';
+
 const AUTO_OPEN_BROWSER = process.argv.includes('--browser') ||
   process.argv.includes('--open') ||
   process.env.AUTO_OPEN_BROWSER === 'true' ||
@@ -484,9 +488,13 @@ const server = http.createServer(async (req, res) => {
       status: 'healthy',
       server: 'ZetaJS Wasm MCP Bridge',
       version: '1.0.0',
-      browser_connected: !!client,
+      // True only for an office-ready browser tab, not for the Node runtime.
+      browser_connected: !!getReadyBrowserClient(),
+      // True when any office-ready Wasm host is attached (browser or Node).
+      runtime_connected: !!client,
+      node_runtime: !!getNodeRuntimeClient(),
       connected_clients: connectedClients.size,
-      mode: IS_HEADLESS ? 'headless' : 'browser',
+      mode: MODE,
       headless_running: !!headlessProcess,
       commit: BUILD_COMMIT,
       started_at: STARTED_AT,
@@ -540,7 +548,7 @@ const server = http.createServer(async (req, res) => {
             : `Launched ${baseUrl}; waiting for the browser tab to finish booting`)
         : `Failed to launch desktop browser for ${baseUrl}`,
       url: baseUrl,
-      mode: IS_HEADLESS ? 'headless' : 'browser',
+      mode: MODE,
       browser_connected: browserConnected,
       browser_already_open: alreadyConnected,
       waited_ms: waited
@@ -554,7 +562,7 @@ const server = http.createServer(async (req, res) => {
       server: 'ZetaJS Wasm MCP Bridge',
       version: '1.0.0',
       status: 'running',
-      mode: IS_HEADLESS ? 'headless' : 'browser',
+      mode: MODE,
       endpoints: ['/health', '/tools', '/tools/:tool_name', '/open_browser']
     }));
     return;
