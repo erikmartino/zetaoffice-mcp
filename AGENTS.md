@@ -125,6 +125,9 @@ cookbook {topic:"<area>"}           # read the recipe before writing UNO by hand
 | `xlsx_freeze.mjs` | post-pass that writes frozen-pane metadata into exported xlsx |
 | `mcp_stdio_server.mjs` | MCP tool definitions (`document`, `text`, `table`, `page`, `field`, `sheet`, `embed`, `cookbook`, `bridge`, `uno`) |
 | `docs/cookbook.md` | recipes + unknown-task playbook |
+| `docs/layout.md` | deterministic layout API (paths, batches, measurement) |
 | `docs/benchmark.md` | fresh-agent benchmark protocol |
 | `scripts/bench.mjs` | run helpers (`list`, `reset`, `start`, `stop`, `summary`) |
+| `scripts/layout_smoke.mjs` | resolver/batch/measure/rollback smoke test |
+| `scripts/layout_mcp_test.mjs` | verifies the `layout` MCP tool via a fresh stdio server |
 | `scripts/gen-uno-index.mjs` | regenerates `public/uno-index.js` from the IDL docs |

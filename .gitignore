@@ -15,3 +15,6 @@ mcp-libre-output/
 Thumbs.db
 *.swp
 __pycache__/
+
+# Local generated documents/out
+out/

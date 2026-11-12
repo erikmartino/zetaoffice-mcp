@@ -61,6 +61,18 @@ all paths below are relative to it.
 The `STALE MCP` abort is part of the protocol: a run on an older server does not
 measure the current improvements.
 
+### Mechanical regression
+
+The benchmark checks can also be used as a regression suite after a code change:
+
+```sh
+node scripts/bench_regression.mjs          # A1, A2, A3, A4, A5, A6, A10, B1, B2, B9, A9
+node scripts/bench_regression.mjs A1 B1    # subset
+```
+
+It spawns a fresh stdio server, writes into `bench/out/<id>` and runs the same
+`scripts/bench_check.py` evaluator. This is not a fresh-agent timing run.
+
 ### Cold variant
 
 Omit the preamble. Compare guided vs cold to see whether the tool descriptions
