@@ -426,6 +426,39 @@ try {
 
 // The Wasm document is serialized in the browser and returned as base64 in the
 // bridge response. Write it to the host filesystem so the MCP client gets a real file.
+// Write through a sibling temp file and rename it into place, so a reader can
+// never observe a half-written package (LibreOffice reports those as corrupt).
+function writeFileAtomic(target, buffer) {
+  const dir = path.dirname(target);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`);
+  let fd;
+  try {
+    fd = fs.openSync(tmp, "w");
+    fs.writeFileSync(fd, buffer);
+    try { fs.fsyncSync(fd); } catch { /* best effort */ }
+    fs.closeSync(fd);
+    fd = undefined;
+    try {
+      fs.renameSync(tmp, target);
+    } catch (err) {
+      // Windows cannot replace an existing file with rename.
+      if (process.platform === "win32" && (err.code === "EEXIST" || err.code === "EPERM")) {
+        fs.rmSync(target, { force: true });
+        fs.renameSync(tmp, target);
+      } else {
+        throw err;
+      }
+    }
+  } catch (err) {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* ignore */ }
+    }
+    try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
+    throw err;
+  }
+}
+
 function persistSaveResult(result, fallbackPath) {
   if (!result || typeof result !== "object") return result;
   if (result.encoding !== "base64" || !result.data) {
@@ -444,9 +477,8 @@ function persistSaveResult(result, fallbackPath) {
       const dir = path.join(process.env.ZETAOFFICE_WORKDIR || __dirname, "mcp-libre-output");
       target = path.join(dir, result.filename || `document.${result.format || "odt"}`);
     }
-    fs.mkdirSync(path.dirname(target), { recursive: true });
     const buffer = Buffer.from(result.data, "base64");
-    fs.writeFileSync(target, buffer);
+    writeFileAtomic(target, buffer);
     return {
       success: true,
       message: `${result.action === "export" ? "Exported" : "Saved"} document to ${target}`,
